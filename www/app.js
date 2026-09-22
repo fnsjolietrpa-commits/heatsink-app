@@ -8,7 +8,13 @@ const CamX = P.CameraXCam;        // custom native CameraX barcode scanner
 const CamPrev = P.CameraPreview;  // camera-preview for photos
 const Filesystem = P.Filesystem;
 const Share = P.Share;
+const Http = P.CapacitorHttp || window.CapacitorHttp;
 const CODE = ['CODE_128'];
+const PHOTO_MAX = 1500, PHOTO_Q = 0.78;
+
+/* ---------- settings (Drive upload) ---------- */
+function getCfg(){ try{ return JSON.parse(localStorage.getItem('heatsink_cfg')||'{}'); }catch(e){ return {}; } }
+function setCfg(c){ try{ localStorage.setItem('heatsink_cfg', JSON.stringify(c)); }catch(e){} }
 
 /* ---------- helpers ---------- */
 function pad(n){ return String(n).padStart(2,'0'); }
@@ -138,7 +144,7 @@ async function pvShoot(){
   try{
     const r=await CamPrev.capture({ quality:92 });
     vibrate(45);
-    const scaled=await downscale('data:image/jpeg;base64,'+r.value, 1600, 0.82);
+    const scaled=await downscale('data:image/jpeg;base64,'+r.value, PHOTO_MAX, PHOTO_Q);
     photoBuf.push(scaled); renderThumbs(); setPhotoTitle();
     if(photoBuf.length>=MAXP){ setTimeout(()=>finishPhotos(photoBuf.slice()), 450); return; }
   }catch(e){ toast('Capture failed'); }
@@ -157,7 +163,7 @@ async function newBox(){
   if(existing){ if(!confirm(short+' already scanned today. Re-shoot? / Ya escaneada. Rehacer?')) return; }
   // Photo 1 = the barcode frame captured by the scanner (focus-locked, sharp).
   const startPhotos = [];
-  if(res.photo){ startPhotos.push(await downscale('data:image/jpeg;base64,'+res.photo, 1600, 0.82)); }
+  if(res.photo){ startPhotos.push(await downscale('data:image/jpeg;base64,'+res.photo, PHOTO_MAX, PHOTO_Q)); }
   toast('Box '+short+' - '+(3-startPhotos.length)+' more photos');
   const photos = await capturePhotos(startPhotos);
   if(!photos || !photos.length){ return; }
@@ -222,14 +228,64 @@ async function exportPDF(){
     });
     const fname = 'Heatsink_Loading'+today()+'.pdf';
     const b64 = doc.output('datauristring').split(',')[1];
-    await Filesystem.writeFile({ path:fname, data:b64, directory:'DOCUMENTS' });
+    try{ await Filesystem.writeFile({ path:fname, data:b64, directory:'DOCUMENTS' }); }catch(e){}
     let uri=null; try{ uri=(await Filesystem.getUri({ path:fname, directory:'DOCUMENTS' })).uri; }catch(e){}
+
+    const cfg = getCfg();
+    if(cfg.uploadUrl){
+      busy('Uploading to Drive...');
+      const up = await uploadToDrive(cfg, fname, b64);
+      unbusy();
+      if(up.ok){ toast('Uploaded to Drive: '+fname); return; }
+      toast('Upload failed: '+up.error+' - opening share');
+      if(uri && Share){ try{ await Share.share({ title:fname, text:fname, url:uri }); }catch(e){} }
+      return;
+    }
     unbusy();
     if(uri && Share){ try{ await Share.share({ title:fname, text:fname, url:uri }); return; }catch(e){} }
     toast('Saved to Documents: '+fname);
   }catch(e){ unbusy(); toast('PDF error: '+(e.message||e)); }
 }
 $('#pdfBtn').onclick = exportPDF;
+
+/* ---------- Drive upload (native HTTP, avoids CORS) ---------- */
+async function uploadToDrive(cfg, fname, b64){
+  try{
+    if(!Http){ return { ok:false, error:'no http' }; }
+    const resp = await Http.post({
+      url: cfg.uploadUrl,
+      headers: { 'Content-Type':'application/json' },
+      connectTimeout: 30000, readTimeout: 180000,
+      data: { token: cfg.uploadToken||'', filename: fname, mimeType:'application/pdf', data: b64 }
+    });
+    let body = resp && resp.data;
+    if(typeof body === 'string'){ try{ body = JSON.parse(body); }catch(e){} }
+    if(body && body.ok){ return { ok:true, url: body.url }; }
+    return { ok:false, error: (body && body.error) || ('HTTP '+(resp&&resp.status)) };
+  }catch(e){ return { ok:false, error: (e && e.message) || String(e) }; }
+}
+
+/* ---------- settings UI ---------- */
+function openSettings(){
+  const c=getCfg(); $('#setUrl').value=c.uploadUrl||''; $('#setToken').value=c.uploadToken||'';
+  $('#setModal').classList.add('show');
+}
+$('#gearBtn').onclick = openSettings;
+$('#setClose').onclick = ()=>$('#setModal').classList.remove('show');
+$('#setSave').onclick = ()=>{
+  const c=getCfg(); c.uploadUrl=$('#setUrl').value.trim(); c.uploadToken=$('#setToken').value.trim();
+  setCfg(c); $('#setModal').classList.remove('show'); toast(c.uploadUrl?'Saved - upload ON':'Saved - upload OFF');
+};
+$('#setTest').onclick = async ()=>{
+  const url=$('#setUrl').value.trim(); if(!url){ toast('Enter URL first'); return; }
+  busy('Testing...');
+  try{
+    const resp = await Http.get({ url, connectTimeout:20000, readTimeout:30000 });
+    unbusy();
+    let body=resp&&resp.data; if(typeof body==='string'){ try{ body=JSON.parse(body); }catch(e){} }
+    toast(body && body.ok ? 'Connection OK' : ('Response: '+(resp&&resp.status)));
+  }catch(e){ unbusy(); toast('Test failed: '+((e&&e.message)||e)); }
+};
 
 /* ---------- clear day ---------- */
 $('#resetBtn').onclick = async ()=>{

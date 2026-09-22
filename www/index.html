@@ -20,6 +20,8 @@
   .done{background:var(--card2); border:1px solid var(--line); border-radius:20px;
     padding:6px 12px; font-size:13px; font-weight:700;}
   .done span{color:var(--ok);}
+  .gear{background:transparent; border:0; color:var(--mut); font-size:22px; padding:4px 6px; line-height:1;}
+  .gear:active{color:var(--tx);}
   .wrap{padding:14px;}
 
   .cta{width:100%; background:var(--accent); color:#fff; border:0; border-radius:16px;
@@ -83,6 +85,24 @@
   #reshootBtn{background:var(--warn); color:#111;}
   #deleteBtn{background:var(--bad); color:#fff;}
 
+  /* settings modal */
+  #setModal{position:fixed; inset:0; z-index:9500; background:var(--bg); display:none; overflow:auto;}
+  #setModal.show{display:block;}
+  #setModal .mh{display:flex; align-items:center; gap:10px; padding:calc(12px + env(safe-area-inset-top)) 14px 12px;
+    background:var(--card); border-bottom:1px solid var(--line); position:sticky; top:0;}
+  #setModal .mh .s{font-size:18px; font-weight:800; flex:1;}
+  #setModal .mh button{background:var(--card2); color:var(--tx); border:1px solid var(--line);
+    border-radius:10px; padding:9px 14px; font-size:14px; font-weight:700;}
+  #setBody{padding:16px;}
+  #setBody label{display:block; font-size:12px; font-weight:700; color:var(--mut); margin:14px 2px 6px; text-transform:uppercase; letter-spacing:.3px;}
+  #setBody input{width:100%; padding:13px; font-size:15px; border-radius:10px; border:1px solid var(--line);
+    background:#0b0d11; color:var(--tx);}
+  #setBody .row2{display:flex; gap:10px; margin-top:18px;}
+  #setBody .row2 button{flex:1; border:0; border-radius:12px; padding:15px; font-size:14px; font-weight:800;}
+  #setSave{background:var(--accent); color:#fff;}
+  #setTest{background:var(--card2); color:var(--tx); border:1px solid var(--line) !important;}
+  #setBody .hint{font-size:11.5px; color:var(--mut); margin-top:14px; line-height:1.5;}
+
   #toast{position:fixed; left:50%; transform:translateX(-50%); bottom:calc(30px + env(safe-area-inset-bottom));
     background:#000; color:#fff; padding:12px 20px; border-radius:24px; font-size:14px; font-weight:700;
     z-index:12000; opacity:0; transition:opacity .2s; pointer-events:none; max-width:88%; text-align:center;}
@@ -100,9 +120,8 @@
 <div id="app">
   <header>
     <div class="brand">Heatsink Loading</div>
-    <div>
-      <div class="date" id="dateLbl"></div>
-    </div>
+    <div class="date" id="dateLbl"></div>
+    <button id="gearBtn" class="gear" aria-label="settings">&#9881;</button>
     <div class="done">Done <span id="doneCount">0</span></div>
   </header>
   <div class="wrap">
@@ -136,6 +155,26 @@
   <div id="viewActions">
     <button id="reshootBtn">Re-shoot &middot; Rehacer</button>
     <button id="deleteBtn">Delete &middot; Eliminar</button>
+  </div>
+</div>
+
+<!-- settings modal -->
+<div id="setModal">
+  <div class="mh">
+    <div class="s">Settings &middot; Ajustes</div>
+    <button id="setClose">Close &middot; Cerrar</button>
+  </div>
+  <div id="setBody">
+    <label>Google Drive upload URL</label>
+    <input id="setUrl" type="url" inputmode="url" autocomplete="off" placeholder="https://script.google.com/macros/s/.../exec">
+    <label>Token</label>
+    <input id="setToken" type="text" autocomplete="off" placeholder="same token as the script">
+    <div class="row2">
+      <button id="setTest">Test</button>
+      <button id="setSave">Save &middot; Guardar</button>
+    </div>
+    <p class="hint">When these are set, <b>Export PDF</b> uploads straight to your Drive folder. Leave blank to use the Android share sheet instead.<br>
+    &#49444; &#44396;&#44553; &#46300;&#46972;&#51060;&#48652; &#51088;&#46041; &#50629;&#47196;&#46300;. &#48708;&#50864;&#47732; &#44277;&#50976;&#52285; &#48169;&#49885;.</p>
   </div>
 </div>
 

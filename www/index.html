@@ -70,9 +70,10 @@
   html.previewing, body.previewing{background:transparent !important;}
   body.previewing #app{display:none;}
   #pvControls{position:absolute; left:0; right:0; bottom:calc(24px + env(safe-area-inset-bottom));
-    display:flex; align-items:center; justify-content:center;}
+    display:flex; align-items:center; justify-content:center; gap:28px;}
   #pvShoot{width:76px; height:76px; border-radius:50%; background:#fff; border:5px solid rgba(255,255,255,.5);}
   #pvShoot:active{transform:scale(.92);}
+  #pvDone{background:var(--ok); color:#fff; border:0; border-radius:24px; padding:14px 22px; font-size:15px; font-weight:700;}
   #pvCancel{position:absolute; top:calc(16px + env(safe-area-inset-top)); right:16px;
     background:rgba(0,0,0,.5); color:#fff; border:0; border-radius:20px; padding:9px 16px; font-size:14px; font-weight:600;}
   #pvLabel{position:absolute; top:calc(18px + env(safe-area-inset-top)); left:16px;
@@ -108,7 +109,7 @@
       <div class="row">
         <div class="meta">
           <div class="name">E. In-app preview (Camera1)</div>
-          <div class="desc">camera-preview 플러그인. 이번엔 프리뷰 화면 보이게 수정. 초점은 중간</div>
+          <div class="desc">camera-preview 플러그인. 프리뷰 보임 + 3장 연속 촬영(Done으로 종료). 화질 좋음</div>
         </div>
         <button class="run" data-m="camPreview">Run</button>
       </div>
@@ -118,7 +119,7 @@
       <div class="row">
         <div class="meta">
           <div class="name">G. CameraX native ⭐</div>
-          <div class="desc">진짜 CameraX. 프리뷰 + 연속 자동초점 + 탭 초점 + 라이브 바코드(ML Kit) + 고화질 촬영. 여러 장 연속 촬영 가능</div>
+          <div class="desc">CameraX. 촬영 전 초점잠금(흔들림↓) + 탭 초점 + 라이브 바코드(고해상 분석). 여러 장 연속 촬영</div>
         </div>
         <button class="run best" data-m="camNative">Run</button>
       </div>
@@ -158,9 +159,12 @@
 
 <!-- camera-preview (E) overlay -->
 <div id="previewOverlay">
-  <div id="pvLabel">In-app preview</div>
+  <div id="pvLabel">In-app preview · <span id="pvCount">0</span> shots</div>
   <button id="pvCancel">Cancel</button>
-  <div id="pvControls"><button id="pvShoot" aria-label="capture"></button></div>
+  <div id="pvControls">
+    <button id="pvShoot" aria-label="capture"></button>
+    <button id="pvDone">Done</button>
+  </div>
 </div>
 
 <script src="zxing.min.js"></script>

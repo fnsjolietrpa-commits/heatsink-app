@@ -5,6 +5,7 @@ import android.annotation.SuppressLint;
 import android.graphics.Color;
 import android.media.Image;
 import android.util.Base64;
+import android.util.Size;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -18,6 +19,7 @@ import androidx.annotation.NonNull;
 import androidx.camera.core.Camera;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.FocusMeteringAction;
+import androidx.camera.core.FocusMeteringResult;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageCapture;
 import androidx.camera.core.ImageCaptureException;
@@ -68,6 +70,7 @@ public class CameraXPlugin extends Plugin {
     private ExecutorService camExec;
     private String lastBarcode = null;
     private int shotCount = 0;
+    private int frameCount = 0;
     private boolean torchOn = false;
 
     @PluginMethod
@@ -235,12 +238,13 @@ public class CameraXPlugin extends Plugin {
         preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
         imageCapture = new ImageCapture.Builder()
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
             .setTargetRotation(rotation)
             .build();
 
         ImageAnalysis analysis = new ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .setTargetResolution(new Size(1280, 720))
             .build();
         analysis.setAnalyzer(camExec, this::analyze);
 
@@ -257,25 +261,53 @@ public class CameraXPlugin extends Plugin {
     private void analyze(@NonNull ImageProxy proxy) {
         Image media = proxy.getImage();
         if (media == null) { proxy.close(); return; }
+        frameCount++;
+        final int fc = frameCount;
         InputImage input = InputImage.fromMediaImage(media, proxy.getImageInfo().getRotationDegrees());
         scanner.process(input)
             .addOnSuccessListener(barcodes -> {
                 if (barcodes != null && !barcodes.isEmpty()) {
                     String v = barcodes.get(0).getRawValue();
-                    if (v != null && !v.equals(lastBarcode)) {
+                    if (v != null) {
+                        boolean changed = !v.equals(lastBarcode);
                         lastBarcode = v;
                         setLabel("OK  " + v);
-                        JSObject ev = new JSObject();
-                        ev.put("value", v);
-                        ev.put("format", "CODE_128");
-                        notifyListeners("barcode", ev);
+                        if (changed) {
+                            JSObject ev = new JSObject();
+                            ev.put("value", v);
+                            ev.put("format", "CODE_128");
+                            notifyListeners("barcode", ev);
+                        }
                     }
+                } else if (lastBarcode == null && fc % 10 == 0) {
+                    setLabel("Scanning...  (" + fc + ")");
                 }
+            })
+            .addOnFailureListener(e -> {
+                if (lastBarcode == null && fc % 10 == 0) setLabel("Scan err: " + e.getMessage());
             })
             .addOnCompleteListener(t -> proxy.close());
     }
 
     private void capturePhoto() {
+        if (imageCapture == null) return;
+        // Lock focus at center first to reduce blur, then take the shot.
+        if (camera != null && previewView != null
+                && previewView.getWidth() > 0 && previewView.getHeight() > 0) {
+            try {
+                MeteringPoint center = previewView.getMeteringPointFactory()
+                    .createPoint(previewView.getWidth() / 2f, previewView.getHeight() / 2f);
+                FocusMeteringAction action = new FocusMeteringAction.Builder(center).build();
+                ListenableFuture<FocusMeteringResult> f =
+                    camera.getCameraControl().startFocusAndMetering(action);
+                f.addListener(this::doTake, ContextCompat.getMainExecutor(getContext()));
+                return;
+            } catch (Exception ignored) {}
+        }
+        doTake();
+    }
+
+    private void doTake() {
         if (imageCapture == null) return;
         imageCapture.takePicture(camExec, new ImageCapture.OnImageCapturedCallback() {
             @Override

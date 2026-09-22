@@ -12,7 +12,7 @@ const Share = P.Share;
 const native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const CODE = ['CODE_128'];
 
-document.getElementById('ver').textContent = 'v-lab2 ' + new Date().toISOString().slice(0,10);
+document.getElementById('ver').textContent = 'v-lab3 ' + new Date().toISOString().slice(0,10);
 
 /* ---------- logging + per-row result ---------- */
 function now(){ return new Date().toLocaleTimeString('en-GB'); }
@@ -104,10 +104,11 @@ async function mlkitLive(){
 }
 $('#scanCancel').onclick = ()=>{ stopMlkitLive(); };
 
-/* ================= E. camera-preview (Camera1) ================= */
-let pvResolve = null;
+/* ================= E. camera-preview (Camera1) — multi-shot ================= */
+let pvActive = false, pvShots = 0, pvBusy = false;
 function stopPreview(){
   const ov = $('#previewOverlay');
+  pvActive = false;
   return (CamPrev && CamPrev.stop ? CamPrev.stop().catch(()=>{}) : Promise.resolve())
     .then(()=>{ document.documentElement.classList.remove('previewing');
                 document.body.classList.remove('previewing'); ov.classList.remove('show'); });
@@ -116,6 +117,7 @@ async function camPreview(){
   if(!CamPrev) return showRes('camPreview', false, 'CameraPreview plugin not available');
   await ensureCamPerm();
   const ov = $('#previewOverlay');
+  pvShots = 0; $('#pvCount').textContent = '0';
   document.documentElement.classList.add('previewing');
   document.body.classList.add('previewing');
   ov.classList.add('show');
@@ -125,31 +127,40 @@ async function camPreview(){
       x:0, y:0, width: window.innerWidth, height: window.innerHeight,
       enableHighResolution:true, storeToFile:false, lockAndroidOrientation:true
     });
+    pvActive = true;
+    showRes('camPreview', true, 'Camera open — capture up to 3 in a row', 'Done으로 종료');
   }catch(e){
     await stopPreview();
     showRes('camPreview', false, 'start failed', e.message||String(e));
     logAdd('E camera-preview', false, e.message||String(e));
-    return;
   }
-  const action = await new Promise(res=>{ pvResolve = res; });
-  if(action === 'cancel'){ await stopPreview(); return; }
+}
+async function pvCapture(){
+  if(!pvActive || pvBusy) return;
+  pvBusy = true;
   try{
     const t0 = performance.now();
     const r = await CamPrev.capture({ quality: 92 });
     const t = performance.now()-t0;
-    await stopPreview();
+    pvShots++;
+    $('#pvCount').textContent = String(pvShots);
     const dataUrl = 'data:image/jpeg;base64,' + r.value;
-    const info = await showPhoto('E', dataUrl, t, null, dataUrl);
-    showRes('camPreview', true, `${info.w}×${info.h}`, `${mb(info.bytes)} · capture ${ms(t)}`);
-    logAdd('E camera-preview', true, `${info.w}×${info.h}`, `${mb(info.bytes)} · ${ms(t)}`);
+    const info = await showPhoto('E #'+pvShots, dataUrl, t, null, dataUrl);
+    showRes('camPreview', true, `${info.w}×${info.h} (shot ${pvShots})`, `${mb(info.bytes)} · capture ${ms(t)}`);
+    logAdd('E camera-preview', true, `shot ${pvShots}: ${info.w}×${info.h}`, `${mb(info.bytes)} · ${ms(t)}`);
   }catch(e){
-    await stopPreview();
     showRes('camPreview', false, 'capture failed', e.message||String(e));
     logAdd('E camera-preview', false, e.message||String(e));
-  }
+  }finally{ pvBusy = false; }
 }
-$('#pvShoot').onclick = ()=>{ if(pvResolve){ const r=pvResolve; pvResolve=null; r('shoot'); } };
-$('#pvCancel').onclick = ()=>{ if(pvResolve){ const r=pvResolve; pvResolve=null; r('cancel'); } };
+async function pvDone(){
+  const n = pvShots;
+  await stopPreview();
+  logAdd('E camera-preview', true, `done · ${n} shot(s)`);
+}
+$('#pvShoot').onclick = pvCapture;
+$('#pvDone').onclick = pvDone;
+$('#pvCancel').onclick = async ()=>{ pvShots = 0; await stopPreview(); logAdd('E camera-preview', false, 'cancelled'); };
 
 /* ================= G. CameraX native (custom plugin) ================= */
 let camxListeners = [];

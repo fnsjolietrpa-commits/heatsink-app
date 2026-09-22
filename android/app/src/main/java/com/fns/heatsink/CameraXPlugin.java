@@ -9,6 +9,7 @@ import android.util.Size;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -26,6 +27,7 @@ import androidx.camera.core.ImageCaptureException;
 import androidx.camera.core.ImageProxy;
 import androidx.camera.core.MeteringPoint;
 import androidx.camera.core.Preview;
+import androidx.camera.core.ZoomState;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
 import androidx.core.content.ContextCompat;
@@ -68,6 +70,7 @@ public class CameraXPlugin extends Plugin {
     private ImageCapture imageCapture;
     private BarcodeScanner scanner;
     private ExecutorService camExec;
+    private ScaleGestureDetector scaleDetector;
     private String lastBarcode = null;
     private int shotCount = 0;
     private int frameCount = 0;
@@ -136,6 +139,8 @@ public class CameraXPlugin extends Plugin {
         previewView.setLayoutParams(new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         previewView.setImplementationMode(PreviewView.ImplementationMode.COMPATIBLE);
+        // Show the full sensor field of view (no crop) so what you see matches what decodes.
+        previewView.setScaleType(PreviewView.ScaleType.FIT_CENTER);
         overlay.addView(previewView);
 
         // detected barcode label (top)
@@ -212,15 +217,34 @@ public class CameraXPlugin extends Plugin {
             overlay.addView(shutter);
         }
 
-        // tap-to-focus on preview
+        // pinch-to-zoom
+        scaleDetector = new ScaleGestureDetector(getContext(),
+            new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                @Override
+                public boolean onScale(ScaleGestureDetector d) {
+                    if (camera == null) return true;
+                    ZoomState zs = camera.getCameraInfo().getZoomState().getValue();
+                    float cur = zs != null ? zs.getZoomRatio() : 1f;
+                    float max = zs != null ? zs.getMaxZoomRatio() : 1f;
+                    float nz = Math.max(1f, Math.min(cur * d.getScaleFactor(), max));
+                    camera.getCameraControl().setZoomRatio(nz);
+                    setLabel(scanOnly ? String.format("Zoom %.1fx", nz) : ("Zoom " + String.format("%.1f", nz) + "x"));
+                    return true;
+                }
+            });
+
+        // pinch to zoom + single-tap to focus
         previewView.setOnTouchListener((v, event) -> {
-            if (event.getAction() == MotionEvent.ACTION_UP && camera != null) {
+            scaleDetector.onTouchEvent(event);
+            if (event.getPointerCount() == 1
+                    && event.getActionMasked() == MotionEvent.ACTION_UP
+                    && !scaleDetector.isInProgress()
+                    && camera != null) {
                 MeteringPoint pt = previewView.getMeteringPointFactory()
                     .createPoint(event.getX(), event.getY());
                 FocusMeteringAction action = new FocusMeteringAction.Builder(pt).build();
                 camera.getCameraControl().startFocusAndMetering(action);
                 v.performClick();
-                return true;
             }
             return true;
         });
@@ -257,9 +281,11 @@ public class CameraXPlugin extends Plugin {
             .setTargetRotation(rotation)
             .build();
 
+        // 4:3 full-sensor field of view (no 16:9 crop) at higher resolution
+        // so weak-camera phones still get enough detail to decode.
         ImageAnalysis analysis = new ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .setTargetResolution(new Size(1280, 720))
+            .setTargetResolution(new Size(1600, 1200))
             .build();
         analysis.setAnalyzer(camExec, this::analyze);
 

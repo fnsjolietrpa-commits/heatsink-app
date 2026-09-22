@@ -1,0 +1,6 @@
+{
+  "appId": "com.fns.heatsink",
+  "appName": "Heatsink Loading",
+  "webDir": "www",
+  "android": { "buildOptions": {} }
+}

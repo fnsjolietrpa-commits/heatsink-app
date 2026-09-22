@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Heatsink Loading</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@600;700&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<script src="jspdf.umd.min.js"></script>
+<style>
+:root{--bg:#eef1f5;--surface:#fff;--surface-2:#f4f6f9;--border:#d5dbe4;--text:#1a2230;--muted:#5f6b7d;
+  --primary:#1e5fd8;--primary-ink:#fff;--success:#12915a;--success-bg:#e2f4ec;--warn:#b8760a;--danger:#d23b3b;
+  --shadow:0 1px 3px rgba(20,30,50,.08);--mono:"IBM Plex Mono",monospace;--sans:"IBM Plex Sans",system-ui,sans-serif}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1319;--surface:#191f28;--surface-2:#212936;--border:#2c3644;
+  --text:#e6ebf2;--muted:#93a0b2;--primary:#4c8dff;--primary-ink:#0b1220;--success:#2bb576;--success-bg:#12291f;--warn:#e0a12a;--danger:#f2665f;--shadow:0 1px 3px rgba(0,0,0,.4)}}
+*{box-sizing:border-box}html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:16px;
+  padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+button{font-family:inherit;font-size:inherit;color:inherit;cursor:pointer}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+#app{display:flex;flex-direction:column;height:100%;max-width:720px;margin:0 auto}
+header{position:sticky;top:0;z-index:20;background:var(--surface);border-bottom:1px solid var(--border);
+  padding:10px 16px;display:flex;align-items:center;gap:12px;box-shadow:var(--shadow)}
+.hd-date{font-size:11.5px;color:var(--muted)}
+.hd-prog{font-size:15px;font-weight:700;display:flex;align-items:baseline;gap:6px}
+.hd-prog .big{font-family:var(--mono);font-size:19px}.hd-prog .of{color:var(--muted);font-weight:500;font-size:12px}
+.hd-spacer{flex:1}
+.hd-btn{height:42px;padding:0 14px;border-radius:10px;border:1px solid var(--border);background:var(--surface-2);
+  font-weight:600;font-size:14px;display:inline-flex;align-items:center;gap:6px}
+.hd-btn.primary{background:var(--primary);color:var(--primary-ink);border-color:transparent}
+.hd-btn.icon{width:42px;padding:0;justify-content:center}.hd-btn:disabled{opacity:.5}
+.newbox{padding:12px 16px 4px}
+.newbox-btn{width:100%;height:66px;border-radius:14px;border:0;background:var(--primary);color:var(--primary-ink);
+  font-weight:800;font-size:18px;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:var(--shadow)}
+.newbox-btn:active{transform:scale(.99)}.newbox-btn svg{width:26px;height:26px}
+.newbox-hint{font-size:11.5px;color:var(--muted);padding:7px 4px 0;text-align:center;line-height:1.4}
+main{flex:1;overflow-y:auto;padding:6px 16px 40px}
+.sec-title{display:flex;align-items:center;gap:8px;margin:16px 2px 8px;font-size:12px;font-weight:700;
+  letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.sec-title .count{background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:1px 8px;font-family:var(--mono);font-size:11px}
+.sec-title.done-h{cursor:pointer}.sec-title .chev{transition:transform .18s}.sec-title.collapsed .chev{transform:rotate(-90deg)}
+.rows{display:flex;flex-direction:column;gap:8px}
+.row{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;padding:16px;box-shadow:var(--shadow);width:100%;text-align:left}
+.row-id{flex:1;font-family:var(--mono);font-size:24px;font-weight:700}
+.row.done .row-id{color:var(--muted)}.row.static{cursor:default}
+.check{width:34px;height:34px;border-radius:50%;background:var(--success);display:flex;align-items:center;justify-content:center;color:#fff}
+.check svg{width:20px;height:20px}.partial{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--warn)}
+.empty{color:var(--muted);text-align:center;padding:24px;font-size:14px;line-height:1.5}
+/* capture overlay */
+.overlay{position:fixed;inset:0;z-index:40;background:var(--bg);display:flex;flex-direction:column;max-width:720px;margin:0 auto}
+.ov-head{background:var(--surface);border-bottom:1px solid var(--border);padding:calc(env(safe-area-inset-top) + 10px) 16px 12px;
+  display:flex;align-items:center;gap:12px;box-shadow:var(--shadow)}
+.ov-back{width:44px;height:44px;border-radius:10px;border:1px solid var(--border);background:var(--surface-2);
+  display:flex;align-items:center;justify-content:center;font-size:24px}
+.ov-id{flex:1;font-family:var(--mono);font-size:26px;font-weight:700}
+.ov-count{font-family:var(--mono);font-weight:700;font-size:14px;padding:6px 12px;border-radius:999px;background:var(--surface-2);color:var(--muted)}
+.ov-count.done{background:var(--success-bg);color:var(--success)}
+.cap-body{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px}
+.cap-strip{display:flex;gap:10px}
+.cap-strip .t{flex:1;aspect-ratio:3/4;border-radius:12px;background:var(--surface-2);border:1px solid var(--border);
+  overflow:hidden;position:relative;display:flex;align-items:center;justify-content:center}
+.cap-strip .t img{width:100%;height:100%;object-fit:cover}
+.cap-strip .t .num{color:var(--muted);font-family:var(--mono);font-size:26px;font-weight:700}
+.cap-strip .t.filled{border-color:var(--success);border-width:2px}
+.cap-strip .t .mini{position:absolute;bottom:5px;right:5px;background:rgba(0,0,0,.6);color:#fff;border-radius:6px;padding:1px 7px;font-size:11px;font-weight:700}
+.cap-hint{font-size:14px;color:var(--muted);text-align:center;line-height:1.5}
+.cam-bar{padding:14px 16px calc(env(safe-area-inset-bottom) + 16px);background:var(--surface);border-top:1px solid var(--border)}
+.cam-shoot{width:100%;height:64px;border-radius:16px;border:0;background:var(--primary);color:var(--primary-ink);
+  font-weight:800;font-size:18px;display:flex;align-items:center;justify-content:center;gap:10px}
+.cam-shoot:active{transform:scale(.99)}.cam-shoot svg{width:26px;height:26px}.cam-shoot:disabled{opacity:.5}
+.cam-done{width:100%;height:64px;border-radius:16px;border:0;background:var(--success);color:#fff;font-weight:800;font-size:18px}
+/* review */
+.rv-grid{display:flex;flex-direction:column;gap:12px}
+.rv-t{position:relative;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#000;width:100%;display:block;padding:0}
+.rv-t img{display:block;width:100%;max-height:42vh;object-fit:contain}
+.rv-t span{position:absolute;top:8px;left:8px;background:rgba(0,0,0,.6);color:#fff;border-radius:6px;padding:2px 8px;font-family:var(--mono);font-size:12px}
+.rv-t.empty{height:80px;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.rv-note{color:var(--muted);font-size:13px;text-align:center;line-height:1.5}
+/* viewer */
+.viewer{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.95);display:flex;flex-direction:column}
+.viewer img{flex:1;width:100%;object-fit:contain;min-height:0}
+.viewer .vbar{display:flex;gap:10px;padding:16px calc(env(safe-area-inset-bottom) + 16px)}
+.viewer .vbar button{flex:1;height:52px;border-radius:12px;border:0;font-weight:700;font-size:16px}
+.vclose-b{background:rgba(255,255,255,.16);color:#fff}.vretake{background:var(--warn);color:#fff}
+.viewer .vcap{position:absolute;top:calc(env(safe-area-inset-top) + 14px);left:0;right:0;text-align:center;color:#fff;font-family:var(--mono);font-size:15px}
+/* modal / toast */
+.modal{position:fixed;inset:0;z-index:80;background:rgba(10,15,25,.5);display:flex;align-items:center;justify-content:center;padding:20px}
+.modal-card{background:var(--surface);border-radius:16px;padding:22px;width:100%;max-width:390px;border:1px solid var(--border)}
+.modal-card h3{margin:0 0 8px}.modal-card p{margin:0 0 18px;color:var(--muted);font-size:14px;line-height:1.5}
+.modal-row{display:flex;gap:10px}.modal-row button{flex:1;height:46px;border-radius:11px;border:1px solid var(--border);background:var(--surface-2);font-weight:700}
+.modal-row button.p{background:var(--primary);color:var(--primary-ink);border-color:transparent}.modal-row button.d{background:var(--danger);color:#fff;border-color:transparent}
+.set-block{margin:0 0 18px}.set-block label{display:block;font-size:12px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.set-block textarea{width:100%;height:110px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);color:var(--text);font-family:var(--mono);font-size:13px;padding:10px}
+.set-actions{display:flex;flex-direction:column;gap:9px}.set-actions button{height:46px;border-radius:11px;border:1px solid var(--border);background:var(--surface-2);font-weight:700}
+.set-actions button.d{color:var(--danger)}.set-close{margin-top:6px;width:100%;height:44px;border:0;background:transparent;color:var(--muted);font-weight:600}
+#toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 24px);transform:translateX(-50%) translateY(20px);z-index:100;
+  background:var(--text);color:var(--bg);padding:12px 20px;border-radius:999px;font-weight:600;font-size:14px;opacity:0;transition:.2s;pointer-events:none;max-width:88vw;text-align:center}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}#toast.err{background:var(--danger);color:#fff}
+#pdfProg{position:fixed;inset:0;z-index:90;background:rgba(10,15,25,.55);display:flex;align-items:center;justify-content:center}
+#pdfProg .box{background:var(--surface);border-radius:16px;padding:26px 30px;text-align:center;min-width:240px}
+#pdfProg .bar{height:8px;background:var(--surface-2);border-radius:4px;overflow:hidden;margin-top:14px}#pdfProg .bar i{display:block;height:100%;background:var(--primary);width:0}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div>
+      <div class="hd-date" id="hdDate">—</div>
+      <div class="hd-prog"><span class="big" id="hdDone">0</span><span class="of">/ <span id="hdTotal">0</span> · done</span></div>
+    </div>
+    <div class="hd-spacer"></div>
+    <button class="hd-btn primary" id="pdfBtn">PDF</button>
+    <button class="hd-btn icon" id="setBtn">⚙</button>
+  </header>
+  <div class="newbox">
+    <button class="newbox-btn" id="newBoxBtn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M6 12h12"/></svg>
+      Scan box barcode / Escanear
+    </button>
+    <div class="newbox-hint">Tap to scan the barcode, then take 3 photos. / Escanee el código, luego 3 fotos.</div>
+  </div>
+  <main id="main"></main>
+</div>
+<div id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Heatsink Loading</string>
+    <string name="title_activity_main">Heatsink Loading</string>
+    <string name="package_name">com.fns.heatsink</string>
+    <string name="custom_url_scheme">com.fns.heatsink</string>
+</resources>

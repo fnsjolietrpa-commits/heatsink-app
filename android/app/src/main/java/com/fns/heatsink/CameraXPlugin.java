@@ -76,6 +76,8 @@ public class CameraXPlugin extends Plugin {
     private String pendingValue = null;
     private int confirmCount = 0;
     private boolean closing = false;
+    private String barcodePhoto = null;
+    private int bpW = 0, bpH = 0;
 
     @PluginMethod
     public void open(PluginCall call) {
@@ -103,6 +105,8 @@ public class CameraXPlugin extends Plugin {
         pendingValue = null;
         confirmCount = 0;
         closing = false;
+        barcodePhoto = null;
+        bpW = 0; bpH = 0;
         scanOnly = Boolean.TRUE.equals(call.getBoolean("scanOnly", false));
         camExec = Executors.newSingleThreadExecutor();
         scanner = BarcodeScanning.getClient(
@@ -294,7 +298,8 @@ public class CameraXPlugin extends Plugin {
                             else { pendingValue = v; confirmCount = 1; }
                             if (confirmCount >= 2) {
                                 closing = true;
-                                getActivity().runOnUiThread(this::closeCamera);
+                                setLabel("Captured: " + v);
+                                getActivity().runOnUiThread(this::captureThenClose);
                             }
                         }
                     }
@@ -324,6 +329,32 @@ public class CameraXPlugin extends Plugin {
             } catch (Exception ignored) {}
         }
         doTake();
+    }
+
+    // scanOnly: grab the barcode frame as the first photo, then close.
+    // A decoded barcode already implies acceptable focus, so capture immediately
+    // (no focus wait -> no risk of hanging on the scan screen).
+    private void captureThenClose() {
+        if (imageCapture == null) { closeCamera(); return; }
+        imageCapture.takePicture(camExec, new ImageCapture.OnImageCapturedCallback() {
+            @Override
+            public void onCaptureSuccess(@NonNull ImageProxy image) {
+                try {
+                    ByteBuffer buffer = image.getPlanes()[0].getBuffer();
+                    byte[] bytes = new byte[buffer.remaining()];
+                    buffer.get(bytes);
+                    bpW = image.getWidth();
+                    bpH = image.getHeight();
+                    barcodePhoto = Base64.encodeToString(bytes, Base64.NO_WRAP);
+                } catch (Exception ignored) {}
+                image.close();
+                getActivity().runOnUiThread(CameraXPlugin.this::closeCamera);
+            }
+            @Override
+            public void onError(@NonNull ImageCaptureException e) {
+                getActivity().runOnUiThread(CameraXPlugin.this::closeCamera);
+            }
+        });
     }
 
     private void doTake() {
@@ -383,6 +414,11 @@ public class CameraXPlugin extends Plugin {
             JSObject ev = new JSObject();
             ev.put("count", shotCount);
             ev.put("barcode", lastBarcode == null ? "" : lastBarcode);
+            if (barcodePhoto != null) {
+                ev.put("photo", barcodePhoto);
+                ev.put("width", bpW);
+                ev.put("height", bpH);
+            }
             notifyListeners("closed", ev);
         });
         if (camExec != null) { camExec.shutdown(); camExec = null; }

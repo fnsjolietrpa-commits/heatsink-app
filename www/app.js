@@ -79,16 +79,20 @@ function scanBarcode(){
     let done=false;
     const finish = async (val)=>{ if(done) return; done=true; await removeScanListeners(); resolve(val); };
     try{
-      scanHandles.push(await CamX.addListener('closed', ev=>{ finish(ev && ev.barcode ? ev.barcode : null); }));
+      scanHandles.push(await CamX.addListener('closed', ev=>{
+        if(ev && ev.barcode){ vibrate(70); finish({ barcode:ev.barcode, photo:ev.photo||null, w:ev.width||0, h:ev.height||0 }); }
+        else { finish(null); }
+      }));
       await CamX.open({ scanOnly:true, formats:CODE });
     }catch(e){ toast('Scan error'); finish(null); }
   });
 }
+function vibrate(ms){ try{ if(navigator.vibrate) navigator.vibrate(ms); }catch(e){} }
 
 /* ---------- capture 3 photos (camera-preview) ---------- */
 let photoBuf=[], photoResolve=null, photoBusy=false;
 const MAXP = 3;
-function setPhotoTitle(){ const n=photoBuf.length; $('#pvTitle').textContent = n>=MAXP ? (MAXP+' / '+MAXP+' done') : ('Photo '+(n+1)+' / '+MAXP); }
+function setPhotoTitle(){ const n=photoBuf.length; $('#pvTitle').textContent = n>=MAXP ? ('Done '+MAXP+' / '+MAXP) : ('Photo '+(n+1)+' / '+MAXP+'  ('+(MAXP-n)+' left)'); }
 function renderThumbs(){ $('#pvThumbs').innerHTML = photoBuf.map(p=>`<img src="${p.data}">`).join(''); }
 function downscale(dataUrl, max, q){
   return new Promise(res=>{
@@ -100,18 +104,23 @@ function downscale(dataUrl, max, q){
   });
 }
 function closePreview(){
-  return (CamPrev&&CamPrev.stop?CamPrev.stop().catch(()=>{}):Promise.resolve()).then(()=>{
-    document.documentElement.classList.remove('previewing');
-    document.body.classList.remove('previewing');
-    $('#previewOverlay').classList.remove('show');
-    $('#pvThumbs').innerHTML=''; $('#pvDone').style.display='none';
-  });
+  // Return to the app UI immediately, then stop the camera in the background,
+  // so Cancel always brings the previous screen back even if stop() is slow.
+  document.documentElement.classList.remove('previewing');
+  document.body.classList.remove('previewing');
+  $('#previewOverlay').classList.remove('show');
+  $('#pvThumbs').innerHTML='';
+  try{ if(CamPrev && CamPrev.stop) CamPrev.stop().catch(()=>{}); }catch(e){}
+  return Promise.resolve();
 }
-function capturePhotos(){
+// startPhotos: photos already taken (e.g. the barcode shot as photo 1).
+function capturePhotos(startPhotos){
   return new Promise(async resolve=>{
-    if(!CamPrev){ toast('Camera not available'); return resolve(null); }
-    photoBuf=[]; photoResolve=resolve; photoBusy=false;
-    renderThumbs(); setPhotoTitle(); $('#pvShoot').disabled=false; $('#pvDone').style.display='none';
+    if(!CamPrev){ toast('Camera not available'); return resolve(startPhotos&&startPhotos.length?startPhotos:null); }
+    photoBuf = (startPhotos||[]).slice();
+    photoResolve=resolve; photoBusy=false;
+    renderThumbs(); setPhotoTitle(); $('#pvShoot').disabled=false;
+    if(photoBuf.length>=MAXP){ setTimeout(()=>finishPhotos(photoBuf.slice()), 200); return; }
     document.documentElement.classList.add('previewing');
     document.body.classList.add('previewing');
     $('#previewOverlay').classList.add('show');
@@ -119,7 +128,7 @@ function capturePhotos(){
       await CamPrev.start({ position:'rear', toBack:true, disableAudio:true, x:0, y:0,
         width:window.innerWidth, height:window.innerHeight, enableHighResolution:true,
         storeToFile:false, lockAndroidOrientation:true });
-    }catch(e){ await closePreview(); toast('Camera failed'); finishPhotos(null); }
+    }catch(e){ closePreview(); toast('Camera failed'); finishPhotos(startPhotos&&startPhotos.length?startPhotos.slice():null); }
   });
 }
 async function finishPhotos(result){ await closePreview(); const r=photoResolve; photoResolve=null; if(r) r(result); }
@@ -128,27 +137,29 @@ async function pvShoot(){
   photoBusy=true; $('#pvShoot').disabled=true;
   try{
     const r=await CamPrev.capture({ quality:92 });
+    vibrate(45);
     const scaled=await downscale('data:image/jpeg;base64,'+r.value, 1600, 0.82);
     photoBuf.push(scaled); renderThumbs(); setPhotoTitle();
-    if(photoBuf.length>=1) $('#pvDone').style.display='inline-block';
-    if(photoBuf.length>=MAXP){ setTimeout(()=>finishPhotos(photoBuf.slice()), 400); return; }
+    if(photoBuf.length>=MAXP){ setTimeout(()=>finishPhotos(photoBuf.slice()), 450); return; }
   }catch(e){ toast('Capture failed'); }
   finally{ photoBusy=false; if(photoBuf.length<MAXP) $('#pvShoot').disabled=false; }
 }
 $('#pvShoot').onclick = pvShoot;
-$('#pvDone').onclick = ()=>{ if(photoBuf.length>0) finishPhotos(photoBuf.slice()); };
 $('#pvCancel').onclick = ()=>{ finishPhotos(null); };
 
 /* ---------- new box flow ---------- */
 async function newBox(){
-  const raw = await scanBarcode();
-  if(!raw){ return; }
-  const { full, serial, short } = parseBox(raw);
+  const res = await scanBarcode();
+  if(!res){ return; }
+  const { full, serial, short } = parseBox(res.barcode);
   const key = today()+'::'+serial;
   const existing = await getBox(key);
   if(existing){ if(!confirm(short+' already scanned today. Re-shoot? / Ya escaneada. Rehacer?')) return; }
-  toast('Box '+short+' - take 3 photos');
-  const photos = await capturePhotos();
+  // Photo 1 = the barcode frame captured by the scanner (focus-locked, sharp).
+  const startPhotos = [];
+  if(res.photo){ startPhotos.push(await downscale('data:image/jpeg;base64,'+res.photo, 1600, 0.82)); }
+  toast('Box '+short+' - '+(3-startPhotos.length)+' more photos');
+  const photos = await capturePhotos(startPhotos);
   if(!photos || !photos.length){ return; }
   await putBox({ key, date:today(), full, serial, short, photos, ts:Date.now() });
   toast('Saved '+short+' ('+photos.length+' photos)');

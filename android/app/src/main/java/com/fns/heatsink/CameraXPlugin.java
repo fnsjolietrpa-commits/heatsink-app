@@ -72,6 +72,10 @@ public class CameraXPlugin extends Plugin {
     private int shotCount = 0;
     private int frameCount = 0;
     private boolean torchOn = false;
+    private boolean scanOnly = false;
+    private String pendingValue = null;
+    private int confirmCount = 0;
+    private boolean closing = false;
 
     @PluginMethod
     public void open(PluginCall call) {
@@ -94,7 +98,12 @@ public class CameraXPlugin extends Plugin {
     private void doOpen(PluginCall call) {
         lastBarcode = null;
         shotCount = 0;
+        frameCount = 0;
         torchOn = false;
+        pendingValue = null;
+        confirmCount = 0;
+        closing = false;
+        scanOnly = Boolean.TRUE.equals(call.getBoolean("scanOnly", false));
         camExec = Executors.newSingleThreadExecutor();
         scanner = BarcodeScanning.getClient(
             new BarcodeScannerOptions.Builder()
@@ -127,7 +136,7 @@ public class CameraXPlugin extends Plugin {
 
         // detected barcode label (top)
         detectedLabel = new TextView(getContext());
-        detectedLabel.setText("Aim at barcode");
+        detectedLabel.setText(scanOnly ? "Scan barcode / Escanear codigo" : "Aim at barcode");
         detectedLabel.setTextColor(Color.WHITE);
         detectedLabel.setTextSize(16);
         detectedLabel.setPadding(dp(14), dp(12), dp(14), dp(12));
@@ -169,33 +178,35 @@ public class CameraXPlugin extends Plugin {
         });
         overlay.addView(torchBtn);
 
-        // counter (above shutter)
-        counterLabel = new TextView(getContext());
-        counterLabel.setText("Shots: 0");
-        counterLabel.setTextColor(Color.WHITE);
-        counterLabel.setTextSize(15);
-        counterLabel.setPadding(dp(12), dp(8), dp(12), dp(8));
-        counterLabel.setBackgroundColor(Color.parseColor("#88000000"));
-        FrameLayout.LayoutParams cnt = new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        cnt.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-        cnt.bottomMargin = dp(120);
-        counterLabel.setLayoutParams(cnt);
-        overlay.addView(counterLabel);
+        if (!scanOnly) {
+            // counter (above shutter)
+            counterLabel = new TextView(getContext());
+            counterLabel.setText("Shots: 0");
+            counterLabel.setTextColor(Color.WHITE);
+            counterLabel.setTextSize(15);
+            counterLabel.setPadding(dp(12), dp(8), dp(12), dp(8));
+            counterLabel.setBackgroundColor(Color.parseColor("#88000000"));
+            FrameLayout.LayoutParams cnt = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            cnt.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+            cnt.bottomMargin = dp(120);
+            counterLabel.setLayoutParams(cnt);
+            overlay.addView(counterLabel);
 
-        // shutter (bottom-center)
-        Button shutter = new Button(getContext());
-        shutter.setText("Capture");
-        shutter.setAllCaps(false);
-        shutter.setTextColor(Color.BLACK);
-        shutter.setTextSize(18);
-        FrameLayout.LayoutParams slp = new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        slp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-        slp.bottomMargin = dp(36);
-        shutter.setLayoutParams(slp);
-        shutter.setOnClickListener(v -> capturePhoto());
-        overlay.addView(shutter);
+            // shutter (bottom-center)
+            Button shutter = new Button(getContext());
+            shutter.setText("Capture");
+            shutter.setAllCaps(false);
+            shutter.setTextColor(Color.BLACK);
+            shutter.setTextSize(18);
+            FrameLayout.LayoutParams slp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            slp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+            slp.bottomMargin = dp(36);
+            shutter.setLayoutParams(slp);
+            shutter.setOnClickListener(v -> capturePhoto());
+            overlay.addView(shutter);
+        }
 
         // tap-to-focus on preview
         previewView.setOnTouchListener((v, event) -> {
@@ -277,6 +288,14 @@ public class CameraXPlugin extends Plugin {
                             ev.put("value", v);
                             ev.put("format", "CODE_128");
                             notifyListeners("barcode", ev);
+                        }
+                        if (scanOnly && !closing) {
+                            if (v.equals(pendingValue)) { confirmCount++; }
+                            else { pendingValue = v; confirmCount = 1; }
+                            if (confirmCount >= 2) {
+                                closing = true;
+                                getActivity().runOnUiThread(this::closeCamera);
+                            }
                         }
                     }
                 } else if (lastBarcode == null && fc % 10 == 0) {

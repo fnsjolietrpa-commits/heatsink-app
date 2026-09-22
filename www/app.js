@@ -1,255 +1,233 @@
-/* Scan / Camera Test Lab — Heatsink Loading
-   Compares: A) ML Kit live (module-free)  E) camera-preview  G) CameraX native */
+/* Heatsink Loading — outbound box photo tool
+   Flow: scan barcode (CameraX native) -> 3 photos (camera-preview) -> save -> daily PDF.
+   Scan-only mode: no preset list, boxes are whatever you scan today. */
 
 const $ = (s) => document.querySelector(s);
 const P = (window.Capacitor && window.Capacitor.Plugins) || {};
-const Camera = P.Camera;
-const BScan = P.BarcodeScanner;       // @capacitor-mlkit/barcode-scanning
-const CamPrev = P.CameraPreview;      // @capacitor-community/camera-preview
-const CamX = P.CameraXCam;            // custom native CameraX plugin
+const CamX = P.CameraXCam;        // custom native CameraX barcode scanner
+const CamPrev = P.CameraPreview;  // camera-preview for photos
 const Filesystem = P.Filesystem;
 const Share = P.Share;
-const native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const CODE = ['CODE_128'];
 
-document.getElementById('ver').textContent = 'v-lab3 ' + new Date().toISOString().slice(0,10);
+/* ---------- helpers ---------- */
+function pad(n){ return String(n).padStart(2,'0'); }
+function today(){ const d=new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+function nowTime(){ const d=new Date(); return pad(d.getHours())+':'+pad(d.getMinutes()); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),1900); }
+function busy(txt){ $('#busyTxt').textContent=txt||'Working...'; $('#busy').classList.add('show'); }
+function unbusy(){ $('#busy').classList.remove('show'); }
 
-/* ---------- logging + per-row result ---------- */
-function now(){ return new Date().toLocaleTimeString('en-GB'); }
-function logAdd(letter, ok, main, extra){
-  const el = document.createElement('div');
-  el.className = 'e';
-  el.innerHTML = `<b>${now()} ${esc(letter)}</b> <span class="${ok?'ok':'bad'}">${ok?'✓':'✗'}</span> ${esc(main)}` +
-                 (extra ? ` <span style="opacity:.7">${esc(extra)}</span>` : '');
-  $('#log').prepend(el);
-}
-function showRes(method, ok, mainHtml, subText){
-  const el = document.getElementById('res-'+method);
-  if(!el) return;
-  el.className = 'res show ' + (ok?'ok':'bad');
-  el.innerHTML = `<div class="v">${ok?'':'✗ '}${mainHtml}</div>` + (subText?`<div class="sub2">${esc(subText)}</div>`:'');
-}
-function esc(s){ return String(s==null?'':s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
-function ms(t){ return Math.round(t) + 'ms'; }
-function mb(bytes){ return bytes ? (bytes/1048576).toFixed(2)+'MB' : '—'; }
+$('#dateLbl').textContent = today();
 
-$('#clearLog').onclick = () => { $('#log').innerHTML=''; };
-
-/* ---------- permissions ---------- */
-async function ensureCamPerm(){
-  try{ if(Camera && Camera.requestPermissions) await Camera.requestPermissions({permissions:['camera']}); }catch(e){}
-  try{ if(BScan && BScan.requestPermissions) await BScan.requestPermissions(); }catch(e){}
+function parseBox(raw){
+  const full = String(raw||'').trim().replace(/\s+/g,' ');
+  const tokens = full.split(' ');
+  let serial = tokens.find(t=>/^[A-Z]\d{6,}$/i.test(t)) || tokens[tokens.length-1] || full;
+  serial = serial.toUpperCase();
+  let short = serial;
+  const m = serial.match(/^([A-Z]\d{5})(\d+)$/);
+  if(m) short = m[1]+'-'+m[2];
+  return { full, serial, short };
 }
 
-/* ---------- image measurement + last-photo panel ---------- */
-async function measure(src){
+/* ---------- IndexedDB ---------- */
+let db;
+function openDB(){
+  return new Promise((res,rej)=>{
+    const r = indexedDB.open('heatsink', 1);
+    r.onupgradeneeded = e=>{ const d=e.target.result; if(!d.objectStoreNames.contains('boxes')) d.createObjectStore('boxes',{keyPath:'key'}); };
+    r.onsuccess = e=>{ db=e.target.result; res(); };
+    r.onerror = e=>rej(e);
+  });
+}
+function tx(mode, fn){
+  return new Promise((res,rej)=>{
+    const t=db.transaction('boxes',mode), s=t.objectStore('boxes');
+    let req; try{ req=fn(s); }catch(e){ rej(e); return; }
+    t.oncomplete=()=>res(req&&req.result); t.onerror=()=>rej(t.error);
+  });
+}
+function getBox(key){ return new Promise(res=>{ const s=db.transaction('boxes').objectStore('boxes'); const r=s.get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>res(null); }); }
+function putBox(rec){ return tx('readwrite', s=>s.put(rec)); }
+function delBox(key){ return tx('readwrite', s=>s.delete(key)); }
+function allBoxes(){ return new Promise(res=>{ const out=[]; const s=db.transaction('boxes').objectStore('boxes'); s.openCursor().onsuccess=e=>{ const c=e.target.result; if(c){ out.push(c.value); c.continue(); } else res(out); }; }); }
+async function todayBoxes(){ return (await allBoxes()).filter(b=>b.date===today()).sort((a,b)=>a.serial<b.serial?-1:(a.serial>b.serial?1:0)); }
+
+/* ---------- render ---------- */
+async function render(){
+  const boxes = await todayBoxes();
+  $('#doneCount').textContent = boxes.length;
+  const list = $('#list');
+  if(!boxes.length){ list.innerHTML = '<div class="empty">No boxes yet &middot; A&uacute;n no hay cajas</div>'; return; }
+  list.innerHTML = boxes.map(b=>`
+    <div class="box" data-key="${esc(b.key)}">
+      <div class="chk">&#10003;</div>
+      <div class="bid"><div class="s">${esc(b.short)}</div><div class="f">${esc(b.full)}</div></div>
+      <div class="bt">${esc(new Date(b.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}))}</div>
+    </div>`).join('');
+  list.querySelectorAll('.box').forEach(el=>el.addEventListener('click',()=>openView(el.dataset.key)));
+}
+
+/* ---------- scan barcode (CameraX native, scanOnly) ---------- */
+let scanHandles = [];
+async function removeScanListeners(){ for(const h of scanHandles){ try{ await h.remove(); }catch(e){} } scanHandles=[]; }
+function scanBarcode(){
+  return new Promise(async resolve=>{
+    if(!CamX){ toast('Scanner not available'); return resolve(null); }
+    let done=false;
+    const finish = async (val)=>{ if(done) return; done=true; await removeScanListeners(); resolve(val); };
+    try{
+      scanHandles.push(await CamX.addListener('closed', ev=>{ finish(ev && ev.barcode ? ev.barcode : null); }));
+      await CamX.open({ scanOnly:true, formats:CODE });
+    }catch(e){ toast('Scan error'); finish(null); }
+  });
+}
+
+/* ---------- capture 3 photos (camera-preview) ---------- */
+let photoBuf=[], photoResolve=null, photoBusy=false;
+const MAXP = 3;
+function setPhotoTitle(){ const n=photoBuf.length; $('#pvTitle').textContent = n>=MAXP ? (MAXP+' / '+MAXP+' done') : ('Photo '+(n+1)+' / '+MAXP); }
+function renderThumbs(){ $('#pvThumbs').innerHTML = photoBuf.map(p=>`<img src="${p.data}">`).join(''); }
+function downscale(dataUrl, max, q){
+  return new Promise(res=>{
+    const img=new Image();
+    img.onload=()=>{ let w=img.naturalWidth,h=img.naturalHeight; const s=Math.min(1,max/Math.max(w,h));
+      const cw=Math.round(w*s),ch=Math.round(h*s); const c=document.createElement('canvas'); c.width=cw; c.height=ch;
+      c.getContext('2d').drawImage(img,0,0,cw,ch); res({data:c.toDataURL('image/jpeg',q),w:cw,h:ch}); };
+    img.onerror=()=>res({data:dataUrl,w:1200,h:1600}); img.src=dataUrl;
+  });
+}
+function closePreview(){
+  return (CamPrev&&CamPrev.stop?CamPrev.stop().catch(()=>{}):Promise.resolve()).then(()=>{
+    document.documentElement.classList.remove('previewing');
+    document.body.classList.remove('previewing');
+    $('#previewOverlay').classList.remove('show');
+    $('#pvThumbs').innerHTML=''; $('#pvDone').style.display='none';
+  });
+}
+function capturePhotos(){
+  return new Promise(async resolve=>{
+    if(!CamPrev){ toast('Camera not available'); return resolve(null); }
+    photoBuf=[]; photoResolve=resolve; photoBusy=false;
+    renderThumbs(); setPhotoTitle(); $('#pvShoot').disabled=false; $('#pvDone').style.display='none';
+    document.documentElement.classList.add('previewing');
+    document.body.classList.add('previewing');
+    $('#previewOverlay').classList.add('show');
+    try{
+      await CamPrev.start({ position:'rear', toBack:true, disableAudio:true, x:0, y:0,
+        width:window.innerWidth, height:window.innerHeight, enableHighResolution:true,
+        storeToFile:false, lockAndroidOrientation:true });
+    }catch(e){ await closePreview(); toast('Camera failed'); finishPhotos(null); }
+  });
+}
+async function finishPhotos(result){ await closePreview(); const r=photoResolve; photoResolve=null; if(r) r(result); }
+async function pvShoot(){
+  if(photoBusy || photoBuf.length>=MAXP) return;
+  photoBusy=true; $('#pvShoot').disabled=true;
   try{
-    const bl = await fetch(src).then(r=>r.blob());
-    let w=0,h=0;
-    try{ const bmp = await createImageBitmap(bl); w=bmp.width; h=bmp.height; bmp.close && bmp.close(); }
-    catch(e){ const d = await imgDims(src); w=d.w; h=d.h; }
-    return {w,h,bytes:bl.size};
-  }catch(e){ const d = await imgDims(src); return {w:d.w,h:d.h,bytes:0}; }
+    const r=await CamPrev.capture({ quality:92 });
+    const scaled=await downscale('data:image/jpeg;base64,'+r.value, 1600, 0.82);
+    photoBuf.push(scaled); renderThumbs(); setPhotoTitle();
+    if(photoBuf.length>=1) $('#pvDone').style.display='inline-block';
+    if(photoBuf.length>=MAXP){ setTimeout(()=>finishPhotos(photoBuf.slice()), 400); return; }
+  }catch(e){ toast('Capture failed'); }
+  finally{ photoBusy=false; if(photoBuf.length<MAXP) $('#pvShoot').disabled=false; }
 }
-function imgDims(src){ return new Promise(res=>{ const i=new Image();
-  i.onload=()=>res({w:i.naturalWidth,h:i.naturalHeight}); i.onerror=()=>res({w:0,h:0}); i.src=src; }); }
+$('#pvShoot').onclick = pvShoot;
+$('#pvDone').onclick = ()=>{ if(photoBuf.length>0) finishPhotos(photoBuf.slice()); };
+$('#pvCancel').onclick = ()=>{ finishPhotos(null); };
 
-let last = { src:null, path:null, dataUrl:null };
-async function showPhoto(letter, src, captureMs, pathForDecode, dataUrl){
-  $('#photoCard').style.display='block';
-  $('#photoPanel').classList.add('show');
-  $('#photoImg').src = src;
-  last = { src, path: pathForDecode||null, dataUrl: dataUrl||null };
-  const info = await measure(src);
-  $('#photoInfo').textContent = `${letter} · ${info.w}×${info.h} · ${mb(info.bytes)}` + (captureMs?` · capture ${ms(captureMs)}`:'');
-  return info;
+/* ---------- new box flow ---------- */
+async function newBox(){
+  const raw = await scanBarcode();
+  if(!raw){ return; }
+  const { full, serial, short } = parseBox(raw);
+  const key = today()+'::'+serial;
+  const existing = await getBox(key);
+  if(existing){ if(!confirm(short+' already scanned today. Re-shoot? / Ya escaneada. Rehacer?')) return; }
+  toast('Box '+short+' - take 3 photos');
+  const photos = await capturePhotos();
+  if(!photos || !photos.length){ return; }
+  await putBox({ key, date:today(), full, serial, short, photos, ts:Date.now() });
+  toast('Saved '+short+' ('+photos.length+' photos)');
+  await render();
 }
+$('#newBox').onclick = newBox;
 
-/* ================= A. ML Kit LIVE (module-free, startScan) ================= */
-let mlkitHandle = null, mlkitErrHandle = null;
-async function stopMlkitLive(){
-  try{ await BScan.stopScan(); }catch(e){}
-  try{ mlkitHandle && await mlkitHandle.remove(); }catch(e){} mlkitHandle=null;
-  try{ mlkitErrHandle && await mlkitErrHandle.remove(); }catch(e){} mlkitErrHandle=null;
-  document.documentElement.classList.remove('scanning');
-  document.body.classList.remove('scanning');
+/* ---------- view / re-shoot / delete ---------- */
+let viewKey=null;
+async function openView(key){
+  const b = await getBox(key); if(!b) return;
+  viewKey=key;
+  $('#viewShort').textContent = b.short;
+  $('#viewFull').textContent = b.full;
+  $('#viewPhotos').innerHTML = (b.photos||[]).map(p=>`<img src="${p.data}">`).join('');
+  $('#viewModal').classList.add('show');
 }
-async function mlkitLive(){
-  if(!BScan) return showRes('mlkitLive', false, 'BarcodeScanner plugin not available');
-  await ensureCamPerm();
-  try{
-    if(BScan.isSupported){ const s = await BScan.isSupported(); if(s && s.supported===false){ return showRes('mlkitLive', false, 'Not supported on this device'); } }
-  }catch(e){}
-  try{
-    mlkitHandle = await BScan.addListener('barcodesScanned', async ev=>{
-      const bc = ev && ev.barcodes && ev.barcodes[0];
-      if(!bc) return;
-      await stopMlkitLive();
-      showRes('mlkitLive', true, esc(bc.rawValue), (bc.format||'') );
-      logAdd('A MLKit live', true, bc.rawValue, bc.format);
-    });
-    mlkitErrHandle = await BScan.addListener('scanError', async ev=>{
-      await stopMlkitLive();
-      showRes('mlkitLive', false, 'scan error', ev && ev.message);
-      logAdd('A MLKit live', false, (ev&&ev.message)||'error');
-    });
-    document.documentElement.classList.add('scanning');
-    document.body.classList.add('scanning');
-    await BScan.startScan({ formats: CODE });
-  }catch(e){
-    await stopMlkitLive();
-    showRes('mlkitLive', false, 'error', e.message||String(e));
-    logAdd('A MLKit live', false, e.message||String(e));
-  }
-}
-$('#scanCancel').onclick = ()=>{ stopMlkitLive(); };
-
-/* ================= E. camera-preview (Camera1) — multi-shot ================= */
-let pvActive = false, pvShots = 0, pvBusy = false;
-function stopPreview(){
-  const ov = $('#previewOverlay');
-  pvActive = false;
-  return (CamPrev && CamPrev.stop ? CamPrev.stop().catch(()=>{}) : Promise.resolve())
-    .then(()=>{ document.documentElement.classList.remove('previewing');
-                document.body.classList.remove('previewing'); ov.classList.remove('show'); });
-}
-async function camPreview(){
-  if(!CamPrev) return showRes('camPreview', false, 'CameraPreview plugin not available');
-  await ensureCamPerm();
-  const ov = $('#previewOverlay');
-  pvShots = 0; $('#pvCount').textContent = '0';
-  document.documentElement.classList.add('previewing');
-  document.body.classList.add('previewing');
-  ov.classList.add('show');
-  try{
-    await CamPrev.start({
-      position:'rear', toBack:true, disableAudio:true,
-      x:0, y:0, width: window.innerWidth, height: window.innerHeight,
-      enableHighResolution:true, storeToFile:false, lockAndroidOrientation:true
-    });
-    pvActive = true;
-    showRes('camPreview', true, 'Camera open — capture up to 3 in a row', 'Done으로 종료');
-  }catch(e){
-    await stopPreview();
-    showRes('camPreview', false, 'start failed', e.message||String(e));
-    logAdd('E camera-preview', false, e.message||String(e));
-  }
-}
-async function pvCapture(){
-  if(!pvActive || pvBusy) return;
-  pvBusy = true;
-  try{
-    const t0 = performance.now();
-    const r = await CamPrev.capture({ quality: 92 });
-    const t = performance.now()-t0;
-    pvShots++;
-    $('#pvCount').textContent = String(pvShots);
-    const dataUrl = 'data:image/jpeg;base64,' + r.value;
-    const info = await showPhoto('E #'+pvShots, dataUrl, t, null, dataUrl);
-    showRes('camPreview', true, `${info.w}×${info.h} (shot ${pvShots})`, `${mb(info.bytes)} · capture ${ms(t)}`);
-    logAdd('E camera-preview', true, `shot ${pvShots}: ${info.w}×${info.h}`, `${mb(info.bytes)} · ${ms(t)}`);
-  }catch(e){
-    showRes('camPreview', false, 'capture failed', e.message||String(e));
-    logAdd('E camera-preview', false, e.message||String(e));
-  }finally{ pvBusy = false; }
-}
-async function pvDone(){
-  const n = pvShots;
-  await stopPreview();
-  logAdd('E camera-preview', true, `done · ${n} shot(s)`);
-}
-$('#pvShoot').onclick = pvCapture;
-$('#pvDone').onclick = pvDone;
-$('#pvCancel').onclick = async ()=>{ pvShots = 0; await stopPreview(); logAdd('E camera-preview', false, 'cancelled'); };
-
-/* ================= G. CameraX native (custom plugin) ================= */
-let camxListeners = [];
-async function removeCamxListeners(){
-  for(const h of camxListeners){ try{ await h.remove(); }catch(e){} }
-  camxListeners = [];
-}
-async function camNative(){
-  if(!CamX){ return showRes('camNative', false, 'CameraXCam not available', '이 빌드에 네이티브 플러그인 미포함 — 재빌드 필요'); }
-  await removeCamxListeners();
-  let shots = 0, lastBc = '';
-  camxListeners.push(await CamX.addListener('barcode', ev=>{
-    lastBc = ev.value || '';
-    logAdd('G live barcode', true, lastBc);
-  }));
-  camxListeners.push(await CamX.addListener('captured', async ev=>{
-    shots++;
-    const dataUrl = 'data:image/jpeg;base64,' + ev.base64;
-    await showPhoto('G #'+shots, dataUrl, 0, null, dataUrl);
-    showRes('camNative', true, `${ev.width}×${ev.height} (shot ${shots})`, `${mb(ev.bytes)} · barcode: ${ev.barcode||'—'}`);
-    logAdd('G CameraX shot', true, `${ev.width}×${ev.height}`, `${mb(ev.bytes)}${ev.barcode?(' · '+ev.barcode):''}`);
-  }));
-  camxListeners.push(await CamX.addListener('closed', async ev=>{
-    logAdd('G CameraX', true, `closed · ${ev.count} shot(s)`, ev.barcode?('barcode '+ev.barcode):'');
-    await removeCamxListeners();
-  }));
-  try{
-    await CamX.open({ formats: CODE });
-    showRes('camNative', true, '카메라 열림 — 촬영/닫기는 화면 버튼', '연속 촬영 후 ✕ Close');
-  }catch(e){
-    showRes('camNative', false, 'open failed', e.message||String(e));
-    logAdd('G CameraX', false, e.message||String(e));
-    await removeCamxListeners();
-  }
-}
-
-/* ---------- re-decode last photo + share ---------- */
-function zxingReader(){
-  const hints = new Map();
-  try{
-    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.CODE_128]);
-    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-  }catch(e){}
-  return new ZXing.BrowserMultiFormatReader(hints);
-}
-async function zxingDecode(src){
-  const reader = zxingReader();
-  const res = await reader.decodeFromImageUrl(src);
-  return res.getText();
-}
-async function writeTmp(dataUrl){
-  const b64 = dataUrl.split(',')[1];
-  const res = await Filesystem.writeFile({ path:'lab_tmp.jpg', data:b64, directory:'CACHE' });
-  return res.uri.replace('file://','');
-}
-$('#decBBtn').onclick = async ()=>{
-  if(!BScan){ alert('ML Kit not available'); return; }
-  if(!last.path && !last.dataUrl){ alert('No photo yet'); return; }
-  try{
-    let path = last.path;
-    if(!path && last.dataUrl){ path = await writeTmp(last.dataUrl); }
-    const { barcodes } = await BScan.readBarcodesFromImage({ path, formats: CODE });
-    const ok = barcodes && barcodes.length;
-    logAdd('↻ MLKit img', ok, ok?barcodes[0].rawValue:'no barcode');
-    showRes('mlkitLive', ok, ok?esc(barcodes[0].rawValue):'no barcode (from photo)', 'ML Kit image decode');
-  }catch(e){ alert('ML Kit error: '+(e.message||e)); }
+function closeView(){ $('#viewModal').classList.remove('show'); viewKey=null; }
+$('#viewClose').onclick = closeView;
+$('#deleteBtn').onclick = async ()=>{
+  if(!viewKey) return;
+  if(!confirm('Delete this box? / Eliminar esta caja?')) return;
+  await delBox(viewKey); closeView(); await render(); toast('Deleted');
 };
-$('#decZBtn').onclick = async ()=>{
-  const src = last.src || last.dataUrl; if(!src){ alert('No photo yet'); return; }
-  try{ const v = await zxingDecode(src); logAdd('↻ ZXing img', true, v); alert('ZXing: '+v); }
-  catch(e){ logAdd('↻ ZXing img', false, 'not found'); alert('ZXing: no barcode'); }
-};
-$('#shareBtn').onclick = async ()=>{
-  try{
-    let url = last.path ? (last.path.startsWith('file')?last.path:('file://'+last.path)) : null;
-    if(!url && last.dataUrl){
-      const b64 = last.dataUrl.split(',')[1];
-      const res = await Filesystem.writeFile({ path:'lab_share.jpg', data:b64, directory:'CACHE' });
-      url = res.uri;
-    }
-    if(!url && last.src){ url = last.src; }
-    await Share.share({ title:'Test capture', url });
-  }catch(e){ alert('Share failed: '+(e.message||e)); }
+$('#reshootBtn').onclick = async ()=>{
+  if(!viewKey) return;
+  const b = await getBox(viewKey); if(!b) return;
+  closeView();
+  toast('Re-shoot '+b.short);
+  const photos = await capturePhotos();
+  if(!photos || !photos.length) return;
+  b.photos = photos; b.ts = Date.now();
+  await putBox(b); await render(); toast('Updated '+b.short);
 };
 
-/* ---------- dispatch ---------- */
-const HANDLERS = { mlkitLive, camPreview, camNative };
-document.querySelectorAll('.run').forEach(btn=>{
-  btn.addEventListener('click', ()=>{ const h = HANDLERS[btn.dataset.m]; if(h) h(); });
-});
+/* ---------- PDF ---------- */
+async function exportPDF(){
+  const boxes = await todayBoxes();
+  if(!boxes.length){ toast('No boxes to export'); return; }
+  busy('Building PDF... '+boxes.length+' boxes');
+  try{
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit:'pt', format:'a4' });
+    const pw = doc.internal.pageSize.getWidth();
+    const ph = doc.internal.pageSize.getHeight();
+    const margin = 36;
+    boxes.forEach((box,i)=>{
+      if(i>0) doc.addPage();
+      doc.setFont('helvetica','bold'); doc.setFontSize(14);
+      doc.text(box.full, margin, 44, { maxWidth: pw-margin*2 });
+      const top=62, avail=ph-top-margin, slotH=avail/3;
+      let y=top;
+      (box.photos||[]).slice(0,3).forEach(p=>{
+        const maxW=pw-margin*2, maxH=slotH-8;
+        const s=Math.min(maxW/p.w, maxH/p.h);
+        const w=p.w*s, h=p.h*s, x=margin+(maxW-w)/2;
+        try{ doc.addImage(p.data,'JPEG',x,y,w,h); }catch(e){}
+        y+=slotH;
+      });
+    });
+    const fname = 'Heatsink_Loading'+today()+'.pdf';
+    const b64 = doc.output('datauristring').split(',')[1];
+    await Filesystem.writeFile({ path:fname, data:b64, directory:'DOCUMENTS' });
+    let uri=null; try{ uri=(await Filesystem.getUri({ path:fname, directory:'DOCUMENTS' })).uri; }catch(e){}
+    unbusy();
+    if(uri && Share){ try{ await Share.share({ title:fname, text:fname, url:uri }); return; }catch(e){} }
+    toast('Saved to Documents: '+fname);
+  }catch(e){ unbusy(); toast('PDF error: '+(e.message||e)); }
+}
+$('#pdfBtn').onclick = exportPDF;
 
-if(!native){ logAdd('env', false, 'Not native — install the APK to test the camera methods.'); }
+/* ---------- clear day ---------- */
+$('#resetBtn').onclick = async ()=>{
+  const boxes = await todayBoxes();
+  if(!boxes.length){ toast('Nothing to clear'); return; }
+  if(!confirm('Clear all '+boxes.length+" of today's boxes? / Borrar todas?")) return;
+  for(const b of boxes){ await delBox(b.key); }
+  await render(); toast('Cleared');
+};
+
+/* ---------- init ---------- */
+(async ()=>{ try{ await openDB(); await render(); }catch(e){ toast('DB error'); } })();

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
-<title>Scan / Camera Test Lab</title>
+<title>Heatsink Loading</title>
 <style>
   :root{
     --bg:#0f1115; --card:#171a21; --card2:#1e222b; --line:#2a2f3a;
@@ -12,162 +12,139 @@
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
   html,body{margin:0; padding:0; background:var(--bg); color:var(--tx);
     font-family:-apple-system,"Segoe UI",Roboto,system-ui,sans-serif; font-size:16px;}
-  body{padding:12px 12px calc(12px + env(safe-area-inset-bottom)); }
-  h1{font-size:19px; margin:4px 2px 2px;}
-  .sub{color:var(--mut); font-size:12.5px; margin:0 2px 14px;}
-  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px; margin-bottom:14px;}
-  .card > .ct{font-size:13px; font-weight:700; letter-spacing:.3px; color:var(--mut); text-transform:uppercase; margin:2px 2px 10px;}
-  .row{display:flex; align-items:center; gap:10px; padding:10px; background:var(--card2);
-    border:1px solid var(--line); border-radius:11px;}
-  .row .meta{flex:1; min-width:0;}
-  .row .name{font-size:15px; font-weight:600;}
-  .row .desc{font-size:11.5px; color:var(--mut); margin-top:2px; line-height:1.35;}
-  .run{flex:0 0 auto; background:var(--accent); color:#fff; border:0; border-radius:10px;
-    padding:11px 15px; font-size:14px; font-weight:700; min-width:72px;}
-  .run:active{filter:brightness(.85);}
-  .best{background:var(--ok);}
-  .res{margin-top:8px; font-size:12.5px; padding:8px 10px; border-radius:9px; display:none; word-break:break-all;}
-  .res.show{display:block;}
-  .res.ok{background:rgba(34,197,94,.12); border:1px solid rgba(34,197,94,.4);}
-  .res.bad{background:rgba(239,68,68,.12); border:1px solid rgba(239,68,68,.4);}
-  .res .v{font-weight:700; font-size:14px;}
-  .res .sub2{color:var(--mut); font-size:11.5px; margin-top:3px;}
-  .rowwrap{margin-bottom:9px;}
-  .rowwrap:last-child{margin-bottom:0;}
-  .hint{font-size:11px; color:var(--mut); margin:8px 2px 0; line-height:1.4;}
+  body{padding:0 0 calc(16px + env(safe-area-inset-bottom));}
+  header{display:flex; align-items:center; gap:10px; padding:calc(12px + env(safe-area-inset-top)) 14px 12px;
+    background:var(--card); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5;}
+  .brand{font-size:17px; font-weight:800; flex:1;}
+  .date{font-size:12px; color:var(--mut);}
+  .done{background:var(--card2); border:1px solid var(--line); border-radius:20px;
+    padding:6px 12px; font-size:13px; font-weight:700;}
+  .done span{color:var(--ok);}
+  .wrap{padding:14px;}
 
-  #photoPanel{display:none; text-align:center;}
-  #photoPanel.show{display:block;}
-  #photoImg{max-width:100%; border-radius:10px; border:1px solid var(--line);}
-  #photoInfo{font-size:12.5px; color:var(--mut); margin-top:8px;}
-  .btnrow{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;}
-  .btn2{flex:1; min-width:90px; background:var(--card2); color:var(--tx); border:1px solid var(--line);
-    border-radius:10px; padding:11px; font-size:13px; font-weight:600;}
-  .btn2:active{filter:brightness(1.3);}
+  .cta{width:100%; background:var(--accent); color:#fff; border:0; border-radius:16px;
+    padding:22px; font-size:20px; font-weight:800; line-height:1.3; margin-bottom:12px;}
+  .cta:active{filter:brightness(.88);}
+  .cta small{display:block; font-size:13px; font-weight:600; opacity:.9; margin-top:4px;}
 
-  #log{font-size:11.5px; color:var(--mut); white-space:pre-wrap; line-height:1.5;
-    max-height:230px; overflow:auto; background:#0b0d11; border:1px solid var(--line);
-    border-radius:10px; padding:10px; margin-top:4px;}
-  #log .e{padding:2px 0; border-bottom:1px dashed #20242e;}
-  #log .e b{color:var(--tx);}
-  #log .e .ok{color:var(--ok);} #log .e .bad{color:var(--bad);}
+  .toolbar{display:flex; gap:10px; margin-bottom:16px;}
+  .tbtn{flex:1; background:var(--card2); color:var(--tx); border:1px solid var(--line);
+    border-radius:12px; padding:14px; font-size:14px; font-weight:700;}
+  .tbtn:active{filter:brightness(1.3);}
+  .tbtn.warn{color:var(--warn);}
 
-  /* ML Kit live (startScan) — preview renders BEHIND the transparent webview */
-  html.scanning, body.scanning{background:transparent !important;}
-  body.scanning #app{visibility:hidden;}
-  #scanFrame{position:fixed; inset:22% 8% auto 8%; height:56%; border:3px solid var(--accent);
-    border-radius:14px; display:none; z-index:10000; box-shadow:0 0 0 4000px rgba(0,0,0,.25);}
-  body.scanning #scanFrame{display:block;}
-  #scanBar{position:fixed; left:0; right:0; bottom:0; display:none; justify-content:center;
-    padding:calc(20px + env(safe-area-inset-bottom)) 20px 20px; z-index:10001;}
-  body.scanning #scanBar{display:flex;}
-  #scanBar button{background:rgba(0,0,0,.6); color:#fff; border:1px solid #fff; border-radius:24px;
-    padding:13px 30px; font-size:15px; font-weight:700;}
+  .sechd{font-size:12px; font-weight:700; letter-spacing:.4px; color:var(--mut);
+    text-transform:uppercase; margin:6px 2px 10px;}
+  .empty{color:var(--mut); font-size:14px; text-align:center; padding:30px 10px;}
 
-  /* camera-preview (E) fullscreen overlay */
+  .box{display:flex; align-items:center; gap:12px; background:var(--card); border:1px solid var(--line);
+    border-radius:12px; padding:14px; margin-bottom:9px;}
+  .box .chk{width:30px; height:30px; border-radius:50%; background:var(--ok); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:800; flex:0 0 auto;}
+  .box .bid{flex:1; min-width:0;}
+  .box .bid .s{font-size:18px; font-weight:800; letter-spacing:.5px;}
+  .box .bid .f{font-size:11px; color:var(--mut); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .box .bt{font-size:11px; color:var(--mut);}
+
+  /* camera (E) overlay */
   #previewOverlay{position:fixed; inset:0; z-index:9999; display:none;}
   #previewOverlay.show{display:block;}
   html.previewing, body.previewing{background:transparent !important;}
   body.previewing #app{display:none;}
-  #pvControls{position:absolute; left:0; right:0; bottom:calc(24px + env(safe-area-inset-bottom));
-    display:flex; align-items:center; justify-content:center; gap:28px;}
-  #pvShoot{width:76px; height:76px; border-radius:50%; background:#fff; border:5px solid rgba(255,255,255,.5);}
+  #pvTop{position:absolute; top:calc(14px + env(safe-area-inset-top)); left:0; right:0; text-align:center; z-index:2;}
+  #pvTop .t1{display:inline-block; background:rgba(0,0,0,.55); color:#fff; border-radius:10px;
+    padding:9px 16px; font-size:16px; font-weight:800;}
+  #pvControls{position:absolute; left:0; right:0; bottom:calc(28px + env(safe-area-inset-bottom));
+    display:flex; align-items:center; justify-content:center; gap:26px;}
+  #pvShoot{width:80px; height:80px; border-radius:50%; background:#fff; border:6px solid rgba(255,255,255,.5);}
   #pvShoot:active{transform:scale(.92);}
-  #pvDone{background:var(--ok); color:#fff; border:0; border-radius:24px; padding:14px 22px; font-size:15px; font-weight:700;}
-  #pvCancel{position:absolute; top:calc(16px + env(safe-area-inset-top)); right:16px;
-    background:rgba(0,0,0,.5); color:#fff; border:0; border-radius:20px; padding:9px 16px; font-size:14px; font-weight:600;}
-  #pvLabel{position:absolute; top:calc(18px + env(safe-area-inset-top)); left:16px;
-    background:rgba(0,0,0,.5); color:#fff; border-radius:8px; padding:7px 12px; font-size:13px; font-weight:600;}
+  #pvShoot:disabled{opacity:.4;}
+  #pvDone{background:var(--ok); color:#fff; border:0; border-radius:26px; padding:16px 22px; font-size:15px; font-weight:800; display:none;}
+  #pvCancel{position:absolute; top:calc(14px + env(safe-area-inset-top)); right:14px;
+    background:rgba(0,0,0,.5); color:#fff; border:0; border-radius:20px; padding:9px 15px; font-size:14px; font-weight:700;}
+  #pvThumbs{position:absolute; left:0; right:0; bottom:calc(130px + env(safe-area-inset-bottom));
+    display:flex; gap:8px; justify-content:center;}
+  #pvThumbs img{width:52px; height:52px; object-fit:cover; border-radius:7px; border:2px solid #fff;}
+
+  /* view modal */
+  #viewModal{position:fixed; inset:0; z-index:9000; background:var(--bg); display:none; overflow:auto;}
+  #viewModal.show{display:block;}
+  #viewModal .mh{display:flex; align-items:center; gap:10px; padding:calc(12px + env(safe-area-inset-top)) 14px 12px;
+    background:var(--card); border-bottom:1px solid var(--line); position:sticky; top:0;}
+  #viewModal .mh .s{font-size:20px; font-weight:800; flex:1;}
+  #viewModal .mh button{background:var(--card2); color:var(--tx); border:1px solid var(--line);
+    border-radius:10px; padding:9px 14px; font-size:14px; font-weight:700;}
+  #viewFull{font-size:12px; color:var(--mut); padding:8px 16px 0; word-break:break-all;}
+  #viewPhotos{padding:12px 14px;}
+  #viewPhotos img{width:100%; border-radius:12px; border:1px solid var(--line); margin-bottom:12px;}
+  #viewActions{display:flex; gap:10px; padding:0 14px 24px;}
+  #viewActions button{flex:1; border-radius:12px; padding:15px; font-size:14px; font-weight:800; border:0;}
+  #reshootBtn{background:var(--warn); color:#111;}
+  #deleteBtn{background:var(--bad); color:#fff;}
+
+  #toast{position:fixed; left:50%; transform:translateX(-50%); bottom:calc(30px + env(safe-area-inset-bottom));
+    background:#000; color:#fff; padding:12px 20px; border-radius:24px; font-size:14px; font-weight:700;
+    z-index:12000; opacity:0; transition:opacity .2s; pointer-events:none; max-width:88%; text-align:center;}
+  #toast.show{opacity:.95;}
+
+  #busy{position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:13000; display:none;
+    align-items:center; justify-content:center; flex-direction:column; gap:14px;}
+  #busy.show{display:flex;}
+  #busy .sp{width:44px; height:44px; border:4px solid #444; border-top-color:#fff; border-radius:50%; animation:spin 1s linear infinite;}
+  #busy .txt{color:#fff; font-size:14px; font-weight:700;}
+  @keyframes spin{to{transform:rotate(360deg);}}
 </style>
 </head>
 <body>
 <div id="app">
-  <h1>Scan / Camera Test Lab</h1>
-  <p class="sub">세 가지 방식 비교 · Compare the three approaches. 촬영한 사진은 아래에서 ML Kit/ZXing로 다시 디코드 가능.</p>
-
-  <!-- BARCODE -->
-  <div class="card">
-    <div class="ct">① Barcode · 바코드</div>
-    <div class="rowwrap">
-      <div class="row">
-        <div class="meta">
-          <div class="name">A. ML Kit LIVE (module-free)</div>
-          <div class="desc">모듈 필요 없는 라이브 스캐너. 프레임에서 바로 인식 → 되면 즉시 값 반환</div>
-        </div>
-        <button class="run" data-m="mlkitLive">Run</button>
-      </div>
-      <div class="res" id="res-mlkitLive"></div>
+  <header>
+    <div class="brand">Heatsink Loading</div>
+    <div>
+      <div class="date" id="dateLbl"></div>
     </div>
-    <p class="hint">※ 예전 A(코드스캐너 모듈 방식)는 그 폰에서 모듈 설치가 안 돼 실패했음 → 모듈 없는 방식으로 교체.<br>
-    ※ ZXing / ML Kit "이미지 디코드"는 아래 촬영 패널의 ↻ 버튼으로 실제 찍은 사진에 대해 비교 (시스템 카메라 안 씀 → 메모리 안전).</p>
+    <div class="done">Done <span id="doneCount">0</span></div>
+  </header>
+  <div class="wrap">
+    <button id="newBox" class="cta">+ New box &middot; Nueva caja
+      <small>Scan barcode &middot; Escanear c&oacute;digo</small></button>
+    <div class="toolbar">
+      <button class="tbtn" id="pdfBtn">Export PDF &middot; PDF</button>
+      <button class="tbtn warn" id="resetBtn">Clear day &middot; Borrar</button>
+    </div>
+    <div class="sechd">Completed today &middot; Completadas hoy</div>
+    <div id="list"><div class="empty">No boxes yet &middot; A&uacute;n no hay cajas</div></div>
   </div>
-
-  <!-- PHOTO -->
-  <div class="card">
-    <div class="ct">② Photo · 사진 (+ 라이브 바코드)</div>
-    <div class="rowwrap">
-      <div class="row">
-        <div class="meta">
-          <div class="name">E. In-app preview (Camera1)</div>
-          <div class="desc">camera-preview 플러그인. 프리뷰 보임 + 3장 연속 촬영(Done으로 종료). 화질 좋음</div>
-        </div>
-        <button class="run" data-m="camPreview">Run</button>
-      </div>
-      <div class="res" id="res-camPreview"></div>
-    </div>
-    <div class="rowwrap">
-      <div class="row">
-        <div class="meta">
-          <div class="name">G. CameraX native ⭐</div>
-          <div class="desc">CameraX. 촬영 전 초점잠금(흔들림↓) + 탭 초점 + 라이브 바코드(고해상 분석). 여러 장 연속 촬영</div>
-        </div>
-        <button class="run best" data-m="camNative">Run</button>
-      </div>
-      <div class="res" id="res-camNative"></div>
-    </div>
-  </div>
-
-  <!-- LAST PHOTO -->
-  <div class="card" id="photoCard" style="display:none;">
-    <div class="ct">Last capture · 마지막 촬영</div>
-    <div id="photoPanel">
-      <img id="photoImg" alt="">
-      <div id="photoInfo"></div>
-      <div class="btnrow">
-        <button class="btn2" id="decBBtn">↻ ML Kit decode</button>
-        <button class="btn2" id="decZBtn">↻ ZXing decode</button>
-        <button class="btn2" id="shareBtn">Share 공유</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- LOG -->
-  <div class="card">
-    <div class="ct" style="display:flex;justify-content:space-between;align-items:center;">
-      <span>Result log · 로그</span>
-      <button class="btn2" style="flex:0;padding:6px 12px;font-size:12px;" id="clearLog">Clear</button>
-    </div>
-    <div id="log"></div>
-  </div>
-
-  <p class="sub" style="text-align:center;">Heatsink Loading — test build · <span id="ver"></span></p>
 </div>
 
-<!-- ML Kit live overlay bits -->
-<div id="scanFrame"></div>
-<div id="scanBar"><button id="scanCancel">Cancel · 취소</button></div>
-
-<!-- camera-preview (E) overlay -->
+<!-- E camera overlay (3 photos) -->
 <div id="previewOverlay">
-  <div id="pvLabel">In-app preview · <span id="pvCount">0</span> shots</div>
-  <button id="pvCancel">Cancel</button>
+  <div id="pvTop"><span class="t1" id="pvTitle">Photo 1 / 3</span></div>
+  <button id="pvCancel">Cancel &middot; Cancelar</button>
+  <div id="pvThumbs"></div>
   <div id="pvControls">
     <button id="pvShoot" aria-label="capture"></button>
-    <button id="pvDone">Done</button>
+    <button id="pvDone">Save &middot; Guardar</button>
   </div>
 </div>
 
-<script src="zxing.min.js"></script>
+<!-- box view modal -->
+<div id="viewModal">
+  <div class="mh">
+    <div class="s" id="viewShort"></div>
+    <button id="viewClose">Close &middot; Cerrar</button>
+  </div>
+  <div id="viewFull"></div>
+  <div id="viewPhotos"></div>
+  <div id="viewActions">
+    <button id="reshootBtn">Re-shoot &middot; Rehacer</button>
+    <button id="deleteBtn">Delete &middot; Eliminar</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div id="busy"><div class="sp"></div><div class="txt" id="busyTxt">Working...</div></div>
+
+<script src="jspdf.umd.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

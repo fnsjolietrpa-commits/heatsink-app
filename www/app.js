@@ -9,7 +9,7 @@ const CamPrev = P.CameraPreview;  // camera-preview for photos
 const Filesystem = P.Filesystem;
 const Share = P.Share;
 const Http = P.CapacitorHttp || window.CapacitorHttp;
-const APP_VERSION = 'v14';
+const APP_VERSION = 'v16';
 const PHOTO_MAX = 1500, PHOTO_Q = 0.78;
 
 /* ---------- configurable values (settings) ---------- */
@@ -233,50 +233,31 @@ $('#reshootBtn').onclick = async ()=>{
   await putBox(b); await render(); scheduleAuto(); toast('Updated '+b.short);
 };
 
-/* rotate portrait photos to landscape so both fill the page width and fit one page */
-function toLandscape(p){
-  return new Promise(res=>{
-    if(!p || !p.data || p.w >= p.h){ res(p); return; }
-    const img=new Image();
-    img.onload=()=>{
-      try{
-        const c=document.createElement('canvas'); c.width=p.h; c.height=p.w;
-        const ctx=c.getContext('2d');
-        ctx.translate(c.width/2, c.height/2); ctx.rotate(Math.PI/2);
-        ctx.drawImage(img, -p.w/2, -p.h/2, p.w, p.h);
-        res({ data:c.toDataURL('image/jpeg',0.85), w:p.h, h:p.w });
-      }catch(e){ res(p); }
-    };
-    img.onerror=()=>res(p); img.src=p.data;
-  });
-}
-
-/* ---------- PDF build (shared by manual export + auto-upload) ---------- */
+/* ---------- PDF build (landscape page, photos side by side) ---------- */
 async function buildPdfBlob(date){
   date = date || today();
   const boxes = await boxesFor(date);
   if(!boxes.length) return null;
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit:'pt', format:'a4' });
-  const pw = doc.internal.pageSize.getWidth();
-  const ph = doc.internal.pageSize.getHeight();
-  const margin = 36;
-  for(let i=0;i<boxes.length;i++){
-    const box = boxes[i];
+  const doc = new jsPDF({ unit:'pt', format:'a4', orientation:'landscape' });
+  const pw = doc.internal.pageSize.getWidth();   // ~842
+  const ph = doc.internal.pageSize.getHeight();  // ~595
+  const margin = 30;
+  boxes.forEach((box,i)=>{
     if(i>0) doc.addPage();
     doc.setFont('helvetica','bold'); doc.setFontSize(14);
-    doc.text(box.full, margin, 44, { maxWidth: pw-margin*2 });
-    const top=62, avail=ph-top-margin, slotH=avail/MAXP;
-    let y=top;
-    const pics=[]; for(const p of (box.photos||[]).slice(0,MAXP)){ pics.push(await toLandscape(p)); }
-    pics.forEach(p=>{
-      const maxW=pw-margin*2, maxH=slotH-8;
-      const s=Math.min(maxW/p.w, maxH/p.h);
-      const w=p.w*s, h=p.h*s, x=margin+(maxW-w)/2;
+    doc.text(box.full, margin, 34, { maxWidth: pw-margin*2 });
+    const top=48, availH=ph-top-margin, gap=12;
+    const cols=Math.max(1, MAXP);
+    const slotW=(pw-margin*2-gap*(cols-1))/cols;
+    (box.photos||[]).slice(0,MAXP).forEach((p,idx)=>{
+      const s=Math.min(slotW/p.w, availH/p.h);
+      const w=p.w*s, h=p.h*s;
+      const x=margin + idx*(slotW+gap) + (slotW-w)/2;
+      const y=top + (availH-h)/2;
       try{ doc.addImage(p.data,'JPEG',x,y,w,h); }catch(e){}
-      y+=slotH;
     });
-  }
+  });
   const fname = filePrefix() + date + '.pdf';
   const b64 = doc.output('datauristring').split(',')[1];
   try{ await Filesystem.writeFile({ path:fname, data:b64, directory:'DOCUMENTS' }); }catch(e){}
@@ -454,6 +435,7 @@ $('#dateToday').onclick = ()=>{ viewDate = today(); render(); };
 
 /* ---------- init ---------- */
 $('#brand').textContent = 'Heatsink ' + MODES[mode].label;
+{ const vl=$('#verLabel'); if(vl) vl.textContent = 'Heatsink '+MODES[mode].label+'  ·  '+APP_VERSION; }
 MAXP = photosPerBox();
 updateSync('idle');
 (async ()=>{ try{ await openDB(); await pruneOld(); await render(); }catch(e){ toast('DB error'); } })();

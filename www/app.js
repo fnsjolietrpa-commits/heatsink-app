@@ -12,9 +12,16 @@ const Http = P.CapacitorHttp || window.CapacitorHttp;
 const CODE = ['CODE_128'];
 const PHOTO_MAX = 1500, PHOTO_Q = 0.78;
 
-/* ---------- settings (Drive upload) ---------- */
+/* ---------- settings (Drive upload + mode) ---------- */
 function getCfg(){ try{ return JSON.parse(localStorage.getItem('heatsink_cfg')||'{}'); }catch(e){ return {}; } }
 function setCfg(c){ try{ localStorage.setItem('heatsink_cfg', JSON.stringify(c)); }catch(e){} }
+
+/* ---------- mode (Loading / Repacking): fixed per app build (see mode.js) ---------- */
+const MODES = {
+  loading:   { label:'Loading',   fileBase:'Heatsink_Loading_'   },   // Heatsink_Loading_2026-09-28.pdf
+  repacking: { label:'Repacking', fileBase:'Heatsink_Repacking_' }    // Heatsink_Repacking_2026-09-28.pdf
+};
+const mode = (window.APP_MODE==='repacking') ? 'repacking' : 'loading';
 
 /* ---------- helpers ---------- */
 function pad(n){ return String(n).padStart(2,'0'); }
@@ -59,7 +66,7 @@ function getBox(key){ return new Promise(res=>{ const s=db.transaction('boxes').
 function putBox(rec){ return tx('readwrite', s=>s.put(rec)); }
 function delBox(key){ return tx('readwrite', s=>s.delete(key)); }
 function allBoxes(){ return new Promise(res=>{ const out=[]; const s=db.transaction('boxes').objectStore('boxes'); s.openCursor().onsuccess=e=>{ const c=e.target.result; if(c){ out.push(c.value); c.continue(); } else res(out); }; }); }
-async function todayBoxes(){ return (await allBoxes()).filter(b=>b.date===today()).sort((a,b)=>a.serial<b.serial?-1:(a.serial>b.serial?1:0)); }
+async function todayBoxes(){ return (await allBoxes()).filter(b=>b.date===today() && (b.mode||'loading')===mode).sort((a,b)=>a.serial<b.serial?-1:(a.serial>b.serial?1:0)); }
 
 /* ---------- render ---------- */
 async function render(){
@@ -97,7 +104,7 @@ function vibrate(ms){ try{ if(navigator.vibrate) navigator.vibrate(ms); }catch(e
 
 /* ---------- capture 3 photos (camera-preview) ---------- */
 let photoBuf=[], photoResolve=null, photoBusy=false;
-const MAXP = 3;
+const MAXP = 2;   // barcode photo + 1 more
 function setPhotoTitle(){ const n=photoBuf.length; $('#pvTitle').textContent = n>=MAXP ? ('Done '+MAXP+' / '+MAXP) : ('Photo '+(n+1)+' / '+MAXP+'  ('+(MAXP-n)+' left)'); }
 function renderThumbs(){ $('#pvThumbs').innerHTML = photoBuf.map(p=>`<img src="${p.data}">`).join(''); }
 function downscale(dataUrl, max, q){
@@ -158,7 +165,7 @@ async function newBox(){
   const res = await scanBarcode();
   if(!res){ return; }
   const { full, serial, short } = parseBox(res.barcode);
-  const key = today()+'::'+serial;
+  const key = mode+'::'+today()+'::'+serial;
   const existing = await getBox(key);
   if(existing){ if(!confirm(short+' already scanned today. Re-shoot? / Ya escaneada. Rehacer?')) return; }
   // Photo 1 = the barcode frame captured by the scanner (focus-locked, sharp).
@@ -167,7 +174,7 @@ async function newBox(){
   toast('Box '+short+' - '+(3-startPhotos.length)+' more photos');
   const photos = await capturePhotos(startPhotos);
   if(!photos || !photos.length){ return; }
-  await putBox({ key, date:today(), full, serial, short, photos, ts:Date.now() });
+  await putBox({ key, mode, date:today(), full, serial, short, photos, ts:Date.now() });
   toast('Saved '+short+' ('+photos.length+' photos)');
   await render();
 }
@@ -216,9 +223,9 @@ async function exportPDF(){
       if(i>0) doc.addPage();
       doc.setFont('helvetica','bold'); doc.setFontSize(14);
       doc.text(box.full, margin, 44, { maxWidth: pw-margin*2 });
-      const top=62, avail=ph-top-margin, slotH=avail/3;
+      const top=62, avail=ph-top-margin, slotH=avail/MAXP;
       let y=top;
-      (box.photos||[]).slice(0,3).forEach(p=>{
+      (box.photos||[]).slice(0,MAXP).forEach(p=>{
         const maxW=pw-margin*2, maxH=slotH-8;
         const s=Math.min(maxW/p.w, maxH/p.h);
         const w=p.w*s, h=p.h*s, x=margin+(maxW-w)/2;
@@ -226,7 +233,7 @@ async function exportPDF(){
         y+=slotH;
       });
     });
-    const fname = 'Heatsink_Loading'+today()+'.pdf';
+    const fname = MODES[mode].fileBase + today() + '.pdf';
     const b64 = doc.output('datauristring').split(',')[1];
     try{ await Filesystem.writeFile({ path:fname, data:b64, directory:'DOCUMENTS' }); }catch(e){}
     let uri=null; try{ uri=(await Filesystem.getUri({ path:fname, directory:'DOCUMENTS' })).uri; }catch(e){}
@@ -297,4 +304,5 @@ $('#resetBtn').onclick = async ()=>{
 };
 
 /* ---------- init ---------- */
+$('#brand').textContent = 'Heatsink ' + MODES[mode].label;
 (async ()=>{ try{ await openDB(); await render(); }catch(e){ toast('DB error'); } })();

@@ -23,6 +23,20 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+
+    // Two separate apps from one project (install side by side).
+    // Difference: app id, app name, and PDF file name (via mode.js override).
+    flavorDimensions "task"
+    productFlavors {
+        loading {
+            dimension "task"
+            applicationId "com.fns.heatsink.loading"
+        }
+        repacking {
+            dimension "task"
+            applicationId "com.fns.heatsink.repacking"
+        }
+    }
 }
 
 repositories {

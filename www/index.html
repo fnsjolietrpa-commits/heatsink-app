@@ -24,9 +24,13 @@
   .gear:active{color:var(--tx);}
   .wrap{padding:14px;}
 
-  .modebar{display:flex; background:var(--card2); border:1px solid var(--line); border-radius:12px; padding:4px; margin-bottom:12px;}
-  .mbtn{flex:1; background:transparent; color:var(--mut); border:0; border-radius:9px; padding:12px; font-size:14px; font-weight:800;}
-  .mbtn.active{background:var(--accent); color:#fff;}
+  .datebar{display:flex; align-items:center; gap:8px; margin-bottom:12px;}
+  .dnav{width:46px; height:46px; border-radius:10px; background:var(--card2); border:1px solid var(--line); color:var(--tx); font-size:15px; font-weight:800;}
+  .dnav:disabled{opacity:.3;}
+  .dnav:active{filter:brightness(1.3);}
+  .dsel{flex:1; text-align:center; font-size:15px; font-weight:800; background:var(--card2); border:1px solid var(--line); border-radius:10px; padding:13px 6px;}
+  .dtoday{padding:0 14px; height:46px; border-radius:10px; background:var(--card2); border:1px solid var(--line); color:var(--mut); font-size:13px; font-weight:700;}
+  .dtoday:active{filter:brightness(1.3);}
 
   .cta{width:100%; background:var(--accent); color:#fff; border:0; border-radius:16px;
     padding:22px; font-size:20px; font-weight:800; line-height:1.3; margin-bottom:12px;}
@@ -38,6 +42,13 @@
     border-radius:12px; padding:14px; font-size:14px; font-weight:700;}
   .tbtn:active{filter:brightness(1.3);}
   .tbtn.warn{color:var(--warn);}
+
+  .syncst{font-size:12px; font-weight:700; margin:-2px 2px 14px; padding:9px 12px; border-radius:9px; text-align:center;}
+  .syncst.off{color:var(--mut); background:var(--card2); border:1px solid var(--line);}
+  .syncst.p{color:var(--warn); background:rgba(245,158,11,.12);}
+  .syncst.s{color:var(--accent); background:rgba(59,130,246,.14);}
+  .syncst.ok{color:var(--ok); background:rgba(34,197,94,.12);}
+  .syncst.e{color:var(--bad); background:rgba(239,68,68,.14);}
 
   .sechd{font-size:12px; font-weight:700; letter-spacing:.4px; color:var(--mut);
     text-transform:uppercase; margin:6px 2px 10px;}
@@ -106,6 +117,9 @@
   #setSave{background:var(--accent); color:#fff;}
   #setTest{background:var(--card2); color:var(--tx); border:1px solid var(--line) !important;}
   #setBody .hint{font-size:11.5px; color:var(--mut); margin-top:14px; line-height:1.5;}
+  #setBody .setgrp{font-size:12px; font-weight:800; color:var(--accent); text-transform:uppercase; letter-spacing:.5px; margin:22px 2px 4px; border-top:1px solid var(--line); padding-top:16px;}
+  .diag{background:#0b0d11; border:1px solid var(--line); border-radius:10px; padding:12px; font-size:11px; line-height:1.6;
+    color:var(--mut); white-space:pre-wrap; word-break:break-all; margin:8px 0; font-family:ui-monospace,Menlo,Consolas,monospace;}
 
   #toast{position:fixed; left:50%; transform:translateX(-50%); bottom:calc(30px + env(safe-area-inset-bottom));
     background:#000; color:#fff; padding:12px 20px; border-radius:24px; font-size:14px; font-weight:700;
@@ -124,17 +138,23 @@
 <div id="app">
   <header>
     <div class="brand" id="brand">Heatsink Loading</div>
-    <div class="date" id="dateLbl"></div>
     <button id="gearBtn" class="gear" aria-label="settings">&#9881;</button>
     <div class="done">Done <span id="doneCount">0</span></div>
   </header>
   <div class="wrap">
+    <div class="datebar">
+      <button id="datePrev" class="dnav" aria-label="previous day">&#9664;</button>
+      <div id="dateSel" class="dsel"></div>
+      <button id="dateNext" class="dnav" aria-label="next day">&#9654;</button>
+      <button id="dateToday" class="dtoday">Today</button>
+    </div>
     <button id="newBox" class="cta">+ New box &middot; Nueva caja
       <small>Scan barcode &middot; Escanear c&oacute;digo</small></button>
     <div class="toolbar">
       <button class="tbtn" id="pdfBtn">Export PDF &middot; PDF</button>
       <button class="tbtn warn" id="resetBtn">Clear day &middot; Borrar</button>
     </div>
+    <div id="syncStatus" class="syncst"></div>
     <div class="sechd">Completed today &middot; Completadas hoy</div>
     <div id="list"><div class="empty">No boxes yet &middot; A&uacute;n no hay cajas</div></div>
   </div>
@@ -173,12 +193,27 @@
     <input id="setUrl" type="url" inputmode="url" autocomplete="off" placeholder="https://script.google.com/macros/s/.../exec">
     <label>Token</label>
     <input id="setToken" type="text" autocomplete="off" placeholder="same token as the script">
+    <label>Keep days on phone &middot; auto-delete older</label>
+    <input id="setKeep" type="number" inputmode="numeric" min="1" placeholder="7">
+
+    <div class="setgrp">Advanced</div>
+    <label>Photos per box</label>
+    <input id="setPhotos" type="number" inputmode="numeric" min="1" max="5" placeholder="2">
+    <label>PDF file name prefix</label>
+    <input id="setPrefix" type="text" autocomplete="off" placeholder="default">
+    <label>Barcode type(s) &middot; comma-separated</label>
+    <input id="setBarcode" type="text" autocomplete="off" placeholder="CODE_128">
+
     <div class="row2">
       <button id="setTest">Test</button>
       <button id="setSave">Save &middot; Guardar</button>
     </div>
-    <p class="hint">When these are set, <b>Export PDF</b> uploads straight to your Drive folder. Leave blank to use the Android share sheet instead.<br>
-    &#49444; &#44396;&#44553; &#46300;&#46972;&#51060;&#48652; &#51088;&#46041; &#50629;&#47196;&#46300;. &#48708;&#50864;&#47732; &#44277;&#50976;&#52285; &#48169;&#49885;.</p>
+    <p class="hint">When URL + token are set, <b>Export PDF</b> and auto-upload send straight to your Drive folder. Leave URL blank to use the Android share sheet.<br>
+    Barcode types: CODE_128, CODE_39, QR_CODE, EAN_13, DATA_MATRIX, ... (comma-separated).</p>
+
+    <div class="setgrp">Diagnostics &middot; &#49345;&#53468;</div>
+    <pre id="diag" class="diag"></pre>
+    <button id="diagRefresh" class="tbtn" style="width:100%;">Refresh &middot; &#49352;&#44256;&#52840;</button>
   </div>
 </div>
 

@@ -3,6 +3,7 @@ package com.fns.heatsink;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.media.Image;
 import android.util.Base64;
 import android.util.Size;
@@ -71,6 +72,7 @@ public class CameraXPlugin extends Plugin {
     private BarcodeScanner scanner;
     private ExecutorService camExec;
     private ScaleGestureDetector scaleDetector;
+    private View focusRing;
     private String lastBarcode = null;
     private int shotCount = 0;
     private int frameCount = 0;
@@ -112,13 +114,49 @@ public class CameraXPlugin extends Plugin {
         bpW = 0; bpH = 0;
         scanOnly = Boolean.TRUE.equals(call.getBoolean("scanOnly", false));
         camExec = Executors.newSingleThreadExecutor();
-        scanner = BarcodeScanning.getClient(
-            new BarcodeScannerOptions.Builder()
-                .setBarcodeFormats(Barcode.FORMAT_CODE_128)
-                .build()
-        );
+        scanner = BarcodeScanning.getClient(buildScannerOptions(call));
         getActivity().runOnUiThread(() -> buildOverlayAndStart(call));
         call.resolve(new JSObject().put("started", true));
+    }
+
+    // Build barcode formats from the JS "formats" array (defaults to CODE_128).
+    private BarcodeScannerOptions buildScannerOptions(PluginCall call) {
+        int first = Barcode.FORMAT_CODE_128;
+        java.util.List<Integer> rest = new java.util.ArrayList<>();
+        try {
+            com.getcapacitor.JSArray arr = call.getArray("formats");
+            if (arr != null) {
+                boolean set = false;
+                for (int i = 0; i < arr.length(); i++) {
+                    int f = formatFromString(arr.getString(i));
+                    if (f == 0) continue;
+                    if (!set) { first = f; set = true; } else { rest.add(f); }
+                }
+            }
+        } catch (Exception ignored) {}
+        int[] more = new int[rest.size()];
+        for (int i = 0; i < rest.size(); i++) more[i] = rest.get(i);
+        return new BarcodeScannerOptions.Builder().setBarcodeFormats(first, more).build();
+    }
+
+    private int formatFromString(String s) {
+        if (s == null) return 0;
+        switch (s.trim().toUpperCase()) {
+            case "CODE_128": return Barcode.FORMAT_CODE_128;
+            case "CODE_39":  return Barcode.FORMAT_CODE_39;
+            case "CODE_93":  return Barcode.FORMAT_CODE_93;
+            case "CODABAR":  return Barcode.FORMAT_CODABAR;
+            case "EAN_13":   return Barcode.FORMAT_EAN_13;
+            case "EAN_8":    return Barcode.FORMAT_EAN_8;
+            case "UPC_A":    return Barcode.FORMAT_UPC_A;
+            case "UPC_E":    return Barcode.FORMAT_UPC_E;
+            case "ITF":      return Barcode.FORMAT_ITF;
+            case "QR_CODE":  return Barcode.FORMAT_QR_CODE;
+            case "DATA_MATRIX": return Barcode.FORMAT_DATA_MATRIX;
+            case "PDF417":   return Barcode.FORMAT_PDF417;
+            case "AZTEC":    return Barcode.FORMAT_AZTEC;
+            default: return 0;
+        }
     }
 
     private int dp(int v) {
@@ -142,6 +180,20 @@ public class CameraXPlugin extends Plugin {
         // Show the full sensor field of view (no crop) so what you see matches what decodes.
         previewView.setScaleType(PreviewView.ScaleType.FIT_CENTER);
         overlay.addView(previewView);
+
+        // focus indicator (animated square shown where you tap)
+        focusRing = new View(getContext());
+        GradientDrawable ring = new GradientDrawable();
+        ring.setShape(GradientDrawable.RECTANGLE);
+        ring.setCornerRadius(dp(8));
+        ring.setStroke(dp(3), Color.parseColor("#FFF4C542"));
+        ring.setColor(Color.TRANSPARENT);
+        focusRing.setBackground(ring);
+        focusRing.setLayoutParams(new FrameLayout.LayoutParams(dp(78), dp(78)));
+        focusRing.setVisibility(View.GONE);
+        focusRing.setClickable(false);
+        focusRing.setFocusable(false);
+        overlay.addView(focusRing);
 
         // detected barcode label (top)
         detectedLabel = new TextView(getContext());
@@ -244,6 +296,7 @@ public class CameraXPlugin extends Plugin {
                     .createPoint(event.getX(), event.getY());
                 FocusMeteringAction action = new FocusMeteringAction.Builder(pt).build();
                 camera.getCameraControl().startFocusAndMetering(action);
+                showFocusRing(event.getX(), event.getY());
                 v.performClick();
             }
             return true;
@@ -449,6 +502,22 @@ public class CameraXPlugin extends Plugin {
         });
         if (camExec != null) { camExec.shutdown(); camExec = null; }
         if (scanner != null) { try { scanner.close(); } catch (Exception ignored) {} scanner = null; }
+    }
+
+    private void showFocusRing(float x, float y) {
+        if (focusRing == null) return;
+        final int size = dp(78);
+        focusRing.setX(x - size / 2f);
+        focusRing.setY(y - size / 2f);
+        focusRing.animate().cancel();
+        focusRing.setVisibility(View.VISIBLE);
+        focusRing.setAlpha(1f);
+        focusRing.setScaleX(1.5f);
+        focusRing.setScaleY(1.5f);
+        focusRing.animate().scaleX(1f).scaleY(1f).setDuration(220)
+            .withEndAction(() -> focusRing.animate().alpha(0f).setStartDelay(320).setDuration(280)
+                .withEndAction(() -> focusRing.setVisibility(View.GONE)).start())
+            .start();
     }
 
     private void setLabel(String s) {

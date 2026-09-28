@@ -9,8 +9,13 @@ const CamPrev = P.CameraPreview;  // camera-preview for photos
 const Filesystem = P.Filesystem;
 const Share = P.Share;
 const Http = P.CapacitorHttp || window.CapacitorHttp;
-const CODE = ['CODE_128'];
+const APP_VERSION = 'v14';
 const PHOTO_MAX = 1500, PHOTO_Q = 0.78;
+
+/* ---------- configurable values (settings) ---------- */
+function photosPerBox(){ let n=parseInt(getCfg().photos,10); if(!n||n<1||n>5) n=2; return n; }
+function scanFormats(){ const s=(getCfg().barcodeFormats||'CODE_128').split(',').map(x=>x.trim().toUpperCase()).filter(Boolean); return s.length?s:['CODE_128']; }
+function filePrefix(){ return ((getCfg().filePrefix||'').trim()) || MODES[mode].fileBase; }
 
 /* ---------- settings (Drive upload + mode) ---------- */
 function getCfg(){ try{ return JSON.parse(localStorage.getItem('heatsink_cfg')||'{}'); }catch(e){ return {}; } }
@@ -32,7 +37,8 @@ function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('sh
 function busy(txt){ $('#busyTxt').textContent=txt||'Working...'; $('#busy').classList.add('show'); }
 function unbusy(){ $('#busy').classList.remove('show'); }
 
-$('#dateLbl').textContent = today();
+let viewDate = today();   // which day's boxes the list shows (new scans always go to today)
+function ymd(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
 
 function parseBox(raw){
   const full = String(raw||'').trim().replace(/\s+/g,' ');
@@ -66,14 +72,31 @@ function getBox(key){ return new Promise(res=>{ const s=db.transaction('boxes').
 function putBox(rec){ return tx('readwrite', s=>s.put(rec)); }
 function delBox(key){ return tx('readwrite', s=>s.delete(key)); }
 function allBoxes(){ return new Promise(res=>{ const out=[]; const s=db.transaction('boxes').objectStore('boxes'); s.openCursor().onsuccess=e=>{ const c=e.target.result; if(c){ out.push(c.value); c.continue(); } else res(out); }; }); }
-async function todayBoxes(){ return (await allBoxes()).filter(b=>b.date===today() && (b.mode||'loading')===mode).sort((a,b)=>a.serial<b.serial?-1:(a.serial>b.serial?1:0)); }
+async function boxesFor(date){ return (await allBoxes()).filter(b=>b.date===date && (b.mode||'loading')===mode).sort((a,b)=>a.serial<b.serial?-1:(a.serial>b.serial?1:0)); }
+async function todayBoxes(){ return boxesFor(today()); }
+
+// Auto-delete boxes older than the retention window (default 7 days, incl. today).
+async function pruneOld(){
+  let keep = parseInt(getCfg().keepDays, 10); if(!keep || keep < 1) keep = 7;
+  const cutoff = ymd(new Date(Date.now() - (keep-1)*86400000));  // oldest day to keep
+  const all = await allBoxes();
+  let n = 0;
+  for(const b of all){ if(b.date < cutoff){ await delBox(b.key); n++; } }
+  return n;
+}
 
 /* ---------- render ---------- */
+function renderDateBar(){
+  const isToday = viewDate===today();
+  const el=$('#dateSel'); if(el) el.textContent = viewDate + (isToday?'  -  Today':'');
+  const nx=$('#dateNext'); if(nx) nx.disabled = isToday;
+}
 async function render(){
-  const boxes = await todayBoxes();
+  renderDateBar();
+  const boxes = await boxesFor(viewDate);
   $('#doneCount').textContent = boxes.length;
   const list = $('#list');
-  if(!boxes.length){ list.innerHTML = '<div class="empty">No boxes yet &middot; A&uacute;n no hay cajas</div>'; return; }
+  if(!boxes.length){ list.innerHTML = '<div class="empty">No boxes &middot; No hay cajas</div>'; return; }
   list.innerHTML = boxes.map(b=>`
     <div class="box" data-key="${esc(b.key)}">
       <div class="chk">&#10003;</div>
@@ -96,7 +119,7 @@ function scanBarcode(){
         if(ev && ev.barcode){ vibrate(70); finish({ barcode:ev.barcode, photo:ev.photo||null, w:ev.width||0, h:ev.height||0 }); }
         else { finish(null); }
       }));
-      await CamX.open({ scanOnly:true, formats:CODE });
+      await CamX.open({ scanOnly:true, formats: scanFormats() });
     }catch(e){ toast('Scan error'); finish(null); }
   });
 }
@@ -104,7 +127,7 @@ function vibrate(ms){ try{ if(navigator.vibrate) navigator.vibrate(ms); }catch(e
 
 /* ---------- capture 3 photos (camera-preview) ---------- */
 let photoBuf=[], photoResolve=null, photoBusy=false;
-const MAXP = 2;   // barcode photo + 1 more
+let MAXP = 2;   // total photos per box (barcode photo + extras); set from settings
 function setPhotoTitle(){ const n=photoBuf.length; $('#pvTitle').textContent = n>=MAXP ? ('Done '+MAXP+' / '+MAXP) : ('Photo '+(n+1)+' / '+MAXP+'  ('+(MAXP-n)+' left)'); }
 function renderThumbs(){ $('#pvThumbs').innerHTML = photoBuf.map(p=>`<img src="${p.data}">`).join(''); }
 function downscale(dataUrl, max, q){
@@ -162,6 +185,7 @@ $('#pvCancel').onclick = ()=>{ finishPhotos(null); };
 
 /* ---------- new box flow ---------- */
 async function newBox(){
+  if(viewDate!==today()){ viewDate=today(); await render(); }  // scans always go to today
   const res = await scanBarcode();
   if(!res){ return; }
   const { full, serial, short } = parseBox(res.barcode);
@@ -177,6 +201,7 @@ async function newBox(){
   await putBox({ key, mode, date:today(), full, serial, short, photos, ts:Date.now() });
   toast('Saved '+short+' ('+photos.length+' photos)');
   await render();
+  scheduleAuto();
 }
 $('#newBox').onclick = newBox;
 
@@ -195,7 +220,7 @@ $('#viewClose').onclick = closeView;
 $('#deleteBtn').onclick = async ()=>{
   if(!viewKey) return;
   if(!confirm('Delete this box? / Eliminar esta caja?')) return;
-  await delBox(viewKey); closeView(); await render(); toast('Deleted');
+  await delBox(viewKey); closeView(); await render(); scheduleAuto(); toast('Deleted');
 };
 $('#reshootBtn').onclick = async ()=>{
   if(!viewKey) return;
@@ -205,55 +230,122 @@ $('#reshootBtn').onclick = async ()=>{
   const photos = await capturePhotos();
   if(!photos || !photos.length) return;
   b.photos = photos; b.ts = Date.now();
-  await putBox(b); await render(); toast('Updated '+b.short);
+  await putBox(b); await render(); scheduleAuto(); toast('Updated '+b.short);
 };
 
-/* ---------- PDF ---------- */
-async function exportPDF(){
-  const boxes = await todayBoxes();
-  if(!boxes.length){ toast('No boxes to export'); return; }
-  busy('Building PDF... '+boxes.length+' boxes');
-  try{
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ unit:'pt', format:'a4' });
-    const pw = doc.internal.pageSize.getWidth();
-    const ph = doc.internal.pageSize.getHeight();
-    const margin = 36;
-    boxes.forEach((box,i)=>{
-      if(i>0) doc.addPage();
-      doc.setFont('helvetica','bold'); doc.setFontSize(14);
-      doc.text(box.full, margin, 44, { maxWidth: pw-margin*2 });
-      const top=62, avail=ph-top-margin, slotH=avail/MAXP;
-      let y=top;
-      (box.photos||[]).slice(0,MAXP).forEach(p=>{
-        const maxW=pw-margin*2, maxH=slotH-8;
-        const s=Math.min(maxW/p.w, maxH/p.h);
-        const w=p.w*s, h=p.h*s, x=margin+(maxW-w)/2;
-        try{ doc.addImage(p.data,'JPEG',x,y,w,h); }catch(e){}
-        y+=slotH;
-      });
-    });
-    const fname = MODES[mode].fileBase + today() + '.pdf';
-    const b64 = doc.output('datauristring').split(',')[1];
-    try{ await Filesystem.writeFile({ path:fname, data:b64, directory:'DOCUMENTS' }); }catch(e){}
-    let uri=null; try{ uri=(await Filesystem.getUri({ path:fname, directory:'DOCUMENTS' })).uri; }catch(e){}
+/* rotate portrait photos to landscape so both fill the page width and fit one page */
+function toLandscape(p){
+  return new Promise(res=>{
+    if(!p || !p.data || p.w >= p.h){ res(p); return; }
+    const img=new Image();
+    img.onload=()=>{
+      try{
+        const c=document.createElement('canvas'); c.width=p.h; c.height=p.w;
+        const ctx=c.getContext('2d');
+        ctx.translate(c.width/2, c.height/2); ctx.rotate(Math.PI/2);
+        ctx.drawImage(img, -p.w/2, -p.h/2, p.w, p.h);
+        res({ data:c.toDataURL('image/jpeg',0.85), w:p.h, h:p.w });
+      }catch(e){ res(p); }
+    };
+    img.onerror=()=>res(p); img.src=p.data;
+  });
+}
 
-    const cfg = getCfg();
-    if(cfg.uploadUrl){
-      busy('Uploading to Drive...');
-      const up = await uploadToDrive(cfg, fname, b64);
-      unbusy();
-      if(up.ok){ toast('Uploaded to Drive: '+fname); return; }
-      toast('Upload failed: '+up.error+' - opening share');
-      if(uri && Share){ try{ await Share.share({ title:fname, text:fname, url:uri }); }catch(e){} }
-      return;
-    }
+/* ---------- PDF build (shared by manual export + auto-upload) ---------- */
+async function buildPdfBlob(date){
+  date = date || today();
+  const boxes = await boxesFor(date);
+  if(!boxes.length) return null;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'a4' });
+  const pw = doc.internal.pageSize.getWidth();
+  const ph = doc.internal.pageSize.getHeight();
+  const margin = 36;
+  for(let i=0;i<boxes.length;i++){
+    const box = boxes[i];
+    if(i>0) doc.addPage();
+    doc.setFont('helvetica','bold'); doc.setFontSize(14);
+    doc.text(box.full, margin, 44, { maxWidth: pw-margin*2 });
+    const top=62, avail=ph-top-margin, slotH=avail/MAXP;
+    let y=top;
+    const pics=[]; for(const p of (box.photos||[]).slice(0,MAXP)){ pics.push(await toLandscape(p)); }
+    pics.forEach(p=>{
+      const maxW=pw-margin*2, maxH=slotH-8;
+      const s=Math.min(maxW/p.w, maxH/p.h);
+      const w=p.w*s, h=p.h*s, x=margin+(maxW-w)/2;
+      try{ doc.addImage(p.data,'JPEG',x,y,w,h); }catch(e){}
+      y+=slotH;
+    });
+  }
+  const fname = filePrefix() + date + '.pdf';
+  const b64 = doc.output('datauristring').split(',')[1];
+  try{ await Filesystem.writeFile({ path:fname, data:b64, directory:'DOCUMENTS' }); }catch(e){}
+  return { fname, b64, count: boxes.length };
+}
+
+async function exportPDF(){
+  busy('Building PDF...');
+  let r; try{ r = await buildPdfBlob(viewDate); }catch(e){ unbusy(); toast('PDF error: '+(e.message||e)); return; }
+  if(!r){ unbusy(); toast('No boxes to export'); return; }
+  let uri=null; try{ uri=(await Filesystem.getUri({ path:r.fname, directory:'DOCUMENTS' })).uri; }catch(e){}
+  const cfg = getCfg();
+  if(cfg.uploadUrl){
+    busy('Uploading to Drive...');
+    const up = await uploadToDrive(cfg, r.fname, r.b64);
+    recordUpload(up.ok, r.fname);
     unbusy();
-    if(uri && Share){ try{ await Share.share({ title:fname, text:fname, url:uri }); return; }catch(e){} }
-    toast('Saved to Documents: '+fname);
-  }catch(e){ unbusy(); toast('PDF error: '+(e.message||e)); }
+    if(up.ok){ updateSync('synced'); toast('Uploaded to Drive: '+r.fname); return; }
+    toast('Upload failed: '+up.error+' - opening share');
+    if(uri && Share){ try{ await Share.share({ title:r.fname, text:r.fname, url:uri }); }catch(e){} }
+    return;
+  }
+  unbusy();
+  if(uri && Share){ try{ await Share.share({ title:r.fname, text:r.fname, url:uri }); return; }catch(e){} }
+  toast('Saved to Documents: '+r.fname);
 }
 $('#pdfBtn').onclick = exportPDF;
+
+/* ---------- continuous auto-upload (debounced; runs when scanning pauses) ---------- */
+let autoTimer=null, autoBusy=false, autoQueued=false;
+const AUTO_DELAY = 25000;   // wait 25s after the last change, so it never runs mid-scan
+function autoEnabled(){ return !!getCfg().uploadUrl; }
+function scheduleAuto(){
+  if(!autoEnabled()) return;
+  autoQueued = true; updateSync('pending');
+  clearTimeout(autoTimer);
+  autoTimer = setTimeout(runAuto, AUTO_DELAY);
+}
+async function runAuto(){
+  if(!autoEnabled()) return;
+  if(autoBusy){ autoQueued = true; return; }   // never overlap uploads
+  autoBusy = true; autoQueued = false; updateSync('syncing');
+  try{
+    const r = await buildPdfBlob(today());   // auto always targets today's file
+    if(!r){ updateSync('idle'); autoBusy=false; return; }
+    const up = await uploadToDrive(getCfg(), r.fname, r.b64);
+    recordUpload(up.ok, r.fname);
+    if(up.ok){ updateSync('synced'); }
+    else { updateSync('error'); setTimeout(scheduleAuto, 60000); }   // retry in 60s
+  }catch(e){ updateSync('error'); setTimeout(scheduleAuto, 60000); }
+  autoBusy = false;
+  if(autoQueued) scheduleAuto();
+}
+function recordUpload(ok, name){ const c=getCfg(); c.lastUploadAt=Date.now(); c.lastUploadOk=!!ok; c.lastUploadName=name||''; setCfg(c); }
+let syncSince='';
+function updateSync(state){
+  const el = $('#syncStatus'); if(!el) return;
+  if(!autoEnabled()){ el.textContent = 'Auto-upload off - set Drive URL in settings'; el.className='syncst off'; return; }
+  if(state==='synced') syncSince = nowTime();
+  const map = {
+    pending: ['Waiting to upload...', 'p'],
+    syncing: ['Uploading to Drive...', 's'],
+    synced:  ['Auto-uploaded ' + syncSince, 'ok'],
+    error:   ['Upload failed - retrying', 'e'],
+    idle:    ['Up to date', 'ok']
+  };
+  const m = map[state] || ['', ''];
+  el.textContent = m[0]; el.className = 'syncst ' + m[1];
+}
 
 /* ---------- Drive upload (native HTTP, avoids CORS) ---------- */
 async function uploadToDrive(cfg, fname, b64){
@@ -274,15 +366,59 @@ async function uploadToDrive(cfg, fname, b64){
 
 /* ---------- settings UI ---------- */
 function openSettings(){
-  const c=getCfg(); $('#setUrl').value=c.uploadUrl||''; $('#setToken').value=c.uploadToken||'';
+  const c=getCfg();
+  $('#setUrl').value=c.uploadUrl||''; $('#setToken').value=c.uploadToken||'';
+  $('#setKeep').value = c.keepDays || '7';
+  $('#setPhotos').value = c.photos || '2';
+  $('#setPrefix').value = c.filePrefix || '';
+  $('#setBarcode').value = c.barcodeFormats || 'CODE_128';
+  $('#setPrefix').placeholder = 'default: ' + MODES[mode].fileBase;
   $('#setModal').classList.add('show');
+  renderDiagnostics();
 }
 $('#gearBtn').onclick = openSettings;
 $('#setClose').onclick = ()=>$('#setModal').classList.remove('show');
-$('#setSave').onclick = ()=>{
-  const c=getCfg(); c.uploadUrl=$('#setUrl').value.trim(); c.uploadToken=$('#setToken').value.trim();
-  setCfg(c); $('#setModal').classList.remove('show'); toast(c.uploadUrl?'Saved - upload ON':'Saved - upload OFF');
+$('#setSave').onclick = async ()=>{
+  const c=getCfg();
+  c.uploadUrl=$('#setUrl').value.trim(); c.uploadToken=$('#setToken').value.trim();
+  let k=parseInt($('#setKeep').value,10); if(!k||k<1) k=7; c.keepDays=k;
+  let p=parseInt($('#setPhotos').value,10); if(!p||p<1||p>5) p=2; c.photos=p;
+  c.filePrefix=$('#setPrefix').value.trim();
+  c.barcodeFormats=($('#setBarcode').value.trim().toUpperCase()) || 'CODE_128';
+  setCfg(c); MAXP = photosPerBox();
+  $('#setModal').classList.remove('show');
+  const removed = await pruneOld(); await render(); updateSync('idle');
+  toast((c.uploadUrl?'Saved - upload ON':'Saved - upload OFF') + (removed?(' - cleared '+removed+' old'):''));
 };
+
+/* ---------- diagnostics ---------- */
+async function renderDiagnostics(){
+  const el=$('#diag'); if(!el) return;
+  el.textContent='...';
+  let boxes=[]; try{ boxes=await allBoxes(); }catch(e){}
+  let bytes=0; const dates={};
+  boxes.forEach(b=>{ (b.photos||[]).forEach(p=>{ if(p&&p.data){ const i=p.data.indexOf(','); bytes+=(p.data.length-(i+1))*0.75; } }); dates[b.date]=1; });
+  const estMB=(bytes/1048576).toFixed(1);
+  let realMB='';
+  try{ if(navigator.storage&&navigator.storage.estimate){ const e=await navigator.storage.estimate(); realMB=' | device '+((e.usage||0)/1048576).toFixed(0)+'MB'; } }catch(e){}
+  const c=getCfg();
+  const last = c.lastUploadAt ? (new Date(c.lastUploadAt).toLocaleString('en-GB')+' - '+(c.lastUploadOk?'OK':'FAILED')+(c.lastUploadName?(' '+c.lastUploadName):'')) : 'never';
+  const cam = (CamX?'CameraX OK':'CameraX MISSING')+' / '+(CamPrev?'Preview OK':'Preview MISSING');
+  el.textContent = [
+    'Version:     '+APP_VERSION+'  ('+MODES[mode].label+')',
+    'Today:       '+today(),
+    'Stored:      '+boxes.length+' boxes, '+Object.keys(dates).length+' day(s), ~'+estMB+'MB'+realMB,
+    'Keep days:   '+(c.keepDays||7),
+    'Photos/box:  '+photosPerBox(),
+    'Barcode:     '+scanFormats().join(', '),
+    'File prefix: '+filePrefix(),
+    'Auto-upload: '+(c.uploadUrl?'ON':'OFF'),
+    'Last upload: '+last,
+    'Camera:      '+cam,
+    'Device:      '+navigator.userAgent
+  ].join('\n');
+}
+$('#diagRefresh').onclick = renderDiagnostics;
 $('#setTest').onclick = async ()=>{
   const url=$('#setUrl').value.trim(); if(!url){ toast('Enter URL first'); return; }
   busy('Testing...');
@@ -294,15 +430,30 @@ $('#setTest').onclick = async ()=>{
   }catch(e){ unbusy(); toast('Test failed: '+((e&&e.message)||e)); }
 };
 
-/* ---------- clear day ---------- */
+/* ---------- clear day (the currently viewed date) ---------- */
 $('#resetBtn').onclick = async ()=>{
-  const boxes = await todayBoxes();
+  const boxes = await boxesFor(viewDate);
   if(!boxes.length){ toast('Nothing to clear'); return; }
-  if(!confirm('Clear all '+boxes.length+" of today's boxes? / Borrar todas?")) return;
+  if(!confirm('Clear all '+boxes.length+' boxes of '+viewDate+'? / Borrar?')) return;
   for(const b of boxes){ await delBox(b.key); }
-  await render(); toast('Cleared');
+  await render();
+  if(viewDate===today()) scheduleAuto();
+  toast('Cleared '+viewDate);
 };
+
+/* ---------- date navigation ---------- */
+function shiftDate(delta){
+  const d = new Date(viewDate+'T00:00:00'); d.setDate(d.getDate()+delta);
+  const ns = ymd(d);
+  if(ns > today()) return;   // never go to the future
+  viewDate = ns; render();
+}
+$('#datePrev').onclick = ()=>shiftDate(-1);
+$('#dateNext').onclick = ()=>shiftDate(1);
+$('#dateToday').onclick = ()=>{ viewDate = today(); render(); };
 
 /* ---------- init ---------- */
 $('#brand').textContent = 'Heatsink ' + MODES[mode].label;
-(async ()=>{ try{ await openDB(); await render(); }catch(e){ toast('DB error'); } })();
+MAXP = photosPerBox();
+updateSync('idle');
+(async ()=>{ try{ await openDB(); await pruneOld(); await render(); }catch(e){ toast('DB error'); } })();

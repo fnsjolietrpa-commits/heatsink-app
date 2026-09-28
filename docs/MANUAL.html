@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heatsink Loading / Repacking — Manual</title>
+<style>
+  :root{--bg:#fff;--tx:#1a1a1a;--mut:#666;--line:#e2e2e2;--accent:#2563eb;--warn:#b45309;--card:#f7f8fa;}
+  @media(prefers-color-scheme:dark){:root{--bg:#0f1115;--tx:#e8eaed;--mut:#9aa3af;--line:#2a2f3a;--accent:#5b9bff;--warn:#f59e0b;--card:#171a21;}}
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--tx);font-family:-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-size:16px;line-height:1.6;padding:24px 18px 60px;max-width:820px;margin:0 auto;}
+  h1{font-size:24px;margin:0 0 4px;}
+  h2{font-size:19px;margin:34px 0 10px;padding-top:16px;border-top:2px solid var(--line);}
+  h3{font-size:16px;margin:20px 0 6px;}
+  .sub{color:var(--mut);font-size:14px;margin:0 0 8px;}
+  code{background:var(--card);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:13px;}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px;}
+  th,td{border:1px solid var(--line);padding:9px 10px;text-align:left;vertical-align:top;}
+  th{background:var(--card);}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:12px 0;}
+  .warn{color:var(--warn);font-weight:700;}
+  ol,ul{padding-left:22px;}
+  li{margin:4px 0;}
+  .kr{color:var(--mut);font-size:13.5px;}
+  .es{color:var(--mut);font-style:italic;}
+</style>
+</head>
+<body>
+
+<h1>Heatsink Loading / Repacking</h1>
+<p class="sub">Operations &amp; maintenance manual &middot; 운영·유지보수 매뉴얼</p>
+
+<div class="card">
+<b>What it does.</b> Scan a box barcode, take 2 photos (the barcode shot + 1 more), and the app builds a daily PDF (one box per page: full ID + photos) and uploads it automatically to Google Drive.
+<span class="kr"><br>박스 바코드 스캔 → 사진 2장(바코드+1장) → 하루치 PDF 자동 생성·드라이브 업로드. 박스당 1페이지(풀 ID + 사진).</span>
+</div>
+
+<h2>1. Daily use &middot; <span class="es">Uso diario</span></h2>
+<ol>
+  <li><b>Tap “+ New box.”</b> <span class="es">Toque “+ New box”.</span></li>
+  <li>Point at the <b>bottom barcode</b> (Code 128, not the QR). It reads automatically. <span class="es">Apunte al código de barras inferior; se lee solo.</span></li>
+  <li>Take the remaining photo(s). At the last photo it <b>saves automatically</b>. <span class="es">Tome las fotos restantes; se guarda solo.</span></li>
+  <li>The box appears with a green check. That’s it — the PDF uploads by itself. <span class="es">Aparece con una marca verde; el PDF se sube solo.</span></li>
+</ol>
+<p>Tips if a barcode won’t read: move ~15–20&nbsp;cm away, <b>pinch to zoom</b>, <b>tap the screen</b> to focus, or turn on <b>Torch</b>. Clean the lens.
+<span class="kr"><br>안 읽히면: 15~20cm, 핀치 줌, 화면 탭(초점), Torch. 렌즈 닦기.</span></p>
+
+<h2>2. Upload status &middot; is it working?</h2>
+<p>The banner under the buttons shows the state:</p>
+<table>
+<tr><th>Banner</th><th>Meaning</th></tr>
+<tr><td>Waiting to upload…</td><td>A change was made; it will upload after a short pause.</td></tr>
+<tr><td>Uploading to Drive…</td><td>Sending now.</td></tr>
+<tr><td>Auto-uploaded 17:32</td><td>Last successful upload time. <b>All good.</b></td></tr>
+<tr><td>Upload failed – retrying</td><td>Will retry in 60s. Check Wi-Fi / token (Settings → Test).</td></tr>
+<tr><td>Auto-upload off</td><td>No Drive URL set. Add it in Settings, or use Export PDF (share sheet).</td></tr>
+</table>
+
+<h2>3. Recover a missed day &middot; 안 올라간 날 복구</h2>
+<p>Use the <b>◀ date ▶</b> bar to go to a past day, then press <b>Export PDF</b>. It rebuilds and uploads that day’s file. New scans always go to <b>today</b>.
+<span class="kr"><br>날짜 화살표로 과거 날짜 이동 → Export PDF 누르면 그날 파일 재생성·업로드. 새 스캔은 항상 오늘로 저장.</span></p>
+
+<h2>4. Settings reference &middot; 설정</h2>
+<p>Open with the <b>⚙️</b> icon (top-right). Each app (Loading / Repacking) has its own settings.</p>
+<table>
+<tr><th>Field</th><th>What it does</th></tr>
+<tr><td>Drive upload URL</td><td>The Apps Script web-app URL (ends in <code>/exec</code>). Enables auto-upload.</td></tr>
+<tr><td>Token</td><td>Must match the <code>TOKEN</code> in the script. A shared password.</td></tr>
+<tr><td>Keep days</td><td>Days of history kept on the phone; older is auto-deleted. Default 7.</td></tr>
+<tr><td>Photos per box</td><td>Total photos incl. the barcode shot. Default 2.</td></tr>
+<tr><td>PDF file name prefix</td><td>Override the file name start. Blank = default (<code>Heatsink_Loading_</code> etc.).</td></tr>
+<tr><td>Barcode type(s)</td><td>Comma-separated (e.g. <code>CODE_128</code>). Add others if labels change.</td></tr>
+</table>
+<p><b>Diagnostics</b> section shows version, storage used, last upload, camera status, device. Screenshot this when reporting a problem.
+<span class="kr"><br>진단 섹션 = 버전·용량·마지막 업로드·카메라 상태·기기. 문제 신고 시 이 화면 스샷 하나면 됨.</span></p>
+
+<h2>5. First-time setup &middot; 최초 설정 (admin)</h2>
+<h3>Install the apps</h3>
+<ol>
+  <li>Download the two APKs (<code>app-loading-debug.apk</code>, <code>app-repacking-debug.apk</code>).</li>
+  <li>On the phone, allow <b>Install unknown apps</b> for your file manager, then tap each APK.</li>
+  <li>Two icons appear: <b>Heatsink Loading</b> and <b>Heatsink Repacking</b>.</li>
+</ol>
+<h3>Set up Google Drive auto-upload</h3>
+<ol>
+  <li>Make a Drive folder. Copy its ID from the URL: <code>drive.google.com/drive/folders/<b>THIS-PART</b></code> (stop at <code>?</code>).</li>
+  <li>Go to <code>script.google.com</code> → New project → paste <code>DriveUpload.gs</code>.</li>
+  <li>Fill <code>FOLDER_ID</code> and <code>TOKEN</code> (any secret string).</li>
+  <li>Deploy → New deployment → <b>Web app</b> → Execute as <b>Me</b>, Access <b>Anyone</b> → Deploy → authorize.</li>
+  <li>Copy the web-app URL (ends in <code>/exec</code>).</li>
+  <li>In the app: ⚙️ → paste URL + the same TOKEN → <b>Test</b> → <b>Save</b>. Repeat for the other app.</li>
+</ol>
+<p class="warn">Own the script with a shared/team Google account, not a personal one — if that account is disabled, uploads stop.
+<span class="kr"> (스크립트는 팀 공용 계정 소유 권장.)</span></p>
+
+<h2>6. Admin / developer tasks &middot; 관리자</h2>
+<table>
+<tr><th>Task</th><th>How</th></tr>
+<tr><td>Change target Drive folder</td><td>Edit <code>FOLDER_ID</code> in the script → Deploy → <b>Manage deployments</b> → edit → <b>New version</b> → Deploy (URL stays the same).</td></tr>
+<tr><td>Change photos / file name / barcode type</td><td>No rebuild — do it in the app’s ⚙️ Settings.</td></tr>
+<tr><td>Rebuild the app (code change / OS fix)</td><td>Push to GitHub → Actions builds both APKs → download <code>heatsink-debug-apks</code>.</td></tr>
+<tr><td>Add a new task mode</td><td>Add a product flavor in <code>android/app/build.gradle</code> + a <code>mode.js</code> override, or ask the developer.</td></tr>
+</table>
+<p class="warn">APK updates: debug builds may be signed differently between builds; if an update won’t install over the old one, uninstall first (this loses on-phone history, but Drive copies are safe). Ask the developer to set a fixed signing key to make updates seamless.
+<span class="kr"><br>업데이트가 덮어설치 안 되면 기존 앱 삭제 후 설치(폰 기록은 날아가지만 드라이브 원본은 안전). 고정 서명 키를 넣으면 이 문제 없어짐.</span></p>
+
+<h2>7. Troubleshooting &middot; 문제 해결</h2>
+<table>
+<tr><th>Problem</th><th>Fix</th></tr>
+<tr><td>Barcode won’t scan</td><td>Get closer (15–20cm), pinch-zoom, tap to focus, Torch on, clean lens. Low-end phones need more light.</td></tr>
+<tr><td>“Upload failed”</td><td>Check Wi-Fi. ⚙️ → Test. Confirm token matches the script. Confirm the web-app is deployed (open the URL in a browser → should say <code>ready</code>).</td></tr>
+<tr><td>File not in Drive</td><td>Check the correct app’s settings point to the right URL/folder. Use ◀ to that day → Export PDF to resend.</td></tr>
+<tr><td>Wrong box saved</td><td>Tap the box → Delete or Re-shoot.</td></tr>
+<tr><td>Storage worry</td><td>Auto-cleans after Keep days. Lower it in Settings, or Clear day.</td></tr>
+<tr><td>Wrong date on files</td><td>Fix the phone clock (use network time).</td></tr>
+<tr><td>Camera shows MISSING in Diagnostics</td><td>Reinstall the APK; report to developer with the Diagnostics screenshot.</td></tr>
+</table>
+
+<p class="sub" style="margin-top:30px;">Heatsink app manual. Keep with the device. &middot; 기기와 함께 보관.</p>
+
+</body>
+</html>
